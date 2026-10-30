@@ -84,3 +84,6 @@ deploy/redis_data/
 .claude/
 issues/
 CLAUDE.md
+
+# Local object storage data and credentials
+.local-storage/

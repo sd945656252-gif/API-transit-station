@@ -9,28 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 以下为重构前各处手写的平台列表 / switch，作为平台清单派生结果的等价基准；
-// 重构后新登记的平台（Command Code、Cline）按同类平台（OpenCode）的位置补入。
+// Explicit expectations preserve platform ordering and capability boundaries, including RunningHub.
 var (
-	legacyAllPlatforms = []string{
+	expectedAllPlatforms = []string{
 		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
-		PlatformCline,
+		PlatformCline, PlatformRunningHub,
 	}
-	legacySchedulerSnapshotPlatforms = []string{
+	expectedSchedulerSnapshotPlatforms = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
-		PlatformCline,
+		PlatformCline, PlatformRunningHub,
 	}
-	legacyCompositeMatchingPlatforms = legacySchedulerSnapshotPlatforms
-	legacyMultiProtocolProviders     = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline}
-	platformProbeValues              = append(append([]string{}, legacyAllPlatforms...), PlatformComposite, "", "moonshot", "Kimi", "openai ", "glm", "bogus")
-	platformProbeAccountTypes        = []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeUpstream, ""}
+	expectedCompositeMatchingPlatforms = expectedSchedulerSnapshotPlatforms
+	expectedMultiProtocolProviders     = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline, PlatformRunningHub}
+	platformProbeValues                = append(append([]string{}, expectedAllPlatforms...), PlatformComposite, "", "moonshot", "Kimi", "openai ", "glm", "bogus")
+	platformProbeAccountTypes          = []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeUpstream, ""}
 )
 
-func legacyIsCNProvider(platform string) bool {
+func expectedIsCNProvider(platform string) bool {
 	switch platform {
 	case PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax:
 		return true
@@ -38,34 +37,34 @@ func legacyIsCNProvider(platform string) bool {
 	return false
 }
 
-func legacyIsOpenAICompatible(platform string) bool {
-	return platform == PlatformOpenAI || platform == PlatformGrok || legacyIsCNProvider(platform) || platform == PlatformOpenCodeGo || platform == PlatformCommandCode || platform == PlatformCline
+func expectedIsOpenAICompatible(platform string) bool {
+	return platform == PlatformOpenAI || platform == PlatformGrok || expectedIsCNProvider(platform) || platform == PlatformOpenCodeGo || platform == PlatformCommandCode || platform == PlatformCline || platform == PlatformRunningHub
 }
 
-func legacyNormalizeOpenAICompatiblePlatform(platform string) string {
+func expectedNormalizeOpenAICompatiblePlatform(platform string) string {
 	switch platform {
-	case PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline:
+	case PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline, PlatformRunningHub:
 		return platform
 	}
 	return PlatformOpenAI
 }
 
-func legacyIsUpstreamBillingProbeIdentity(platform, accountType string) bool {
+func expectedIsUpstreamBillingProbeIdentity(platform, accountType string) bool {
 	if accountType != AccountTypeAPIKey {
 		return false
 	}
 	switch platform {
 	case PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,
-		PlatformTypeSafe, PlatformCommandCode, PlatformCline:
+		PlatformTypeSafe, PlatformCommandCode, PlatformCline, PlatformRunningHub:
 		return true
 	}
 	return false
 }
 
-func legacyIsHeaderOverrideEligible(platform, accountType string) bool {
+func expectedIsHeaderOverrideEligible(platform, accountType string) bool {
 	switch platform {
-	case PlatformAnthropic, PlatformOpenAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline:
+	case PlatformAnthropic, PlatformOpenAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline, PlatformRunningHub:
 		return accountType == AccountTypeAPIKey
 	case PlatformGrok:
 		return accountType == AccountTypeAPIKey || accountType == AccountTypeOAuth
@@ -73,8 +72,8 @@ func legacyIsHeaderOverrideEligible(platform, accountType string) bool {
 	return false
 }
 
-func legacyIsConcreteRequestPlatform(platform string) bool {
-	for _, p := range legacyAllPlatforms {
+func expectedIsConcreteRequestPlatform(platform string) bool {
+	for _, p := range expectedAllPlatforms {
 		if p == platform {
 			return true
 		}
@@ -82,31 +81,31 @@ func legacyIsConcreteRequestPlatform(platform string) bool {
 	return false
 }
 
-func TestPlatformListDerivedListsMatchLegacy(t *testing.T) {
-	require.Equal(t, legacyAllPlatforms, AllowedQuotaPlatforms)
-	require.Equal(t, legacySchedulerSnapshotPlatforms, schedulerSnapshotPlatforms())
-	require.Equal(t, legacyCompositeMatchingPlatforms, matchingPlatforms(PlatformComposite))
+func TestPlatformListDerivedListsMatchContract(t *testing.T) {
+	require.Equal(t, expectedAllPlatforms, AllowedQuotaPlatforms)
+	require.Equal(t, expectedSchedulerSnapshotPlatforms, schedulerSnapshotPlatforms())
+	require.Equal(t, expectedCompositeMatchingPlatforms, matchingPlatforms(PlatformComposite))
 	require.Equal(t, []string{PlatformKimi}, matchingPlatforms(PlatformKimi))
 
 	var multiProtocol []string
-	for _, platform := range legacyAllPlatforms {
+	for _, platform := range expectedAllPlatforms {
 		if IsMultiProtocolAPIKeyProvider(platform) {
 			multiProtocol = append(multiProtocol, platform)
 		}
 	}
-	require.Equal(t, legacyMultiProtocolProviders, multiProtocol)
+	require.Equal(t, expectedMultiProtocolProviders, multiProtocol)
 }
 
-func TestPlatformListDerivedPredicatesMatchLegacy(t *testing.T) {
+func TestPlatformListDerivedPredicatesMatchContract(t *testing.T) {
 	for _, platform := range platformProbeValues {
-		require.Equal(t, legacyIsCNProvider(platform), IsCNProvider(platform), platform)
-		require.Equal(t, legacyIsConcreteRequestPlatform(platform), isConcreteRequestPlatform(platform), platform)
-		require.Equal(t, legacyNormalizeOpenAICompatiblePlatform(platform), NormalizeOpenAICompatiblePlatform(platform), platform)
-		require.Equal(t, legacyIsOpenAICompatible(platform), (&Account{Platform: platform}).IsOpenAICompatible(), platform)
+		require.Equal(t, expectedIsCNProvider(platform), IsCNProvider(platform), platform)
+		require.Equal(t, expectedIsConcreteRequestPlatform(platform), isConcreteRequestPlatform(platform), platform)
+		require.Equal(t, expectedNormalizeOpenAICompatiblePlatform(platform), NormalizeOpenAICompatiblePlatform(platform), platform)
+		require.Equal(t, expectedIsOpenAICompatible(platform), (&Account{Platform: platform}).IsOpenAICompatible(), platform)
 		for _, accountType := range platformProbeAccountTypes {
-			require.Equal(t, legacyIsUpstreamBillingProbeIdentity(platform, accountType),
+			require.Equal(t, expectedIsUpstreamBillingProbeIdentity(platform, accountType),
 				IsUpstreamBillingProbeIdentity(platform, accountType), "%s/%s", platform, accountType)
-			require.Equal(t, legacyIsHeaderOverrideEligible(platform, accountType),
+			require.Equal(t, expectedIsHeaderOverrideEligible(platform, accountType),
 				(&Account{Platform: platform, Type: accountType}).IsHeaderOverrideEligible(), "%s/%s", platform, accountType)
 		}
 	}
@@ -124,12 +123,12 @@ func TestProviderProfilesUseOpenAIGateway(t *testing.T) {
 
 // 转发、探测与计费中"多协议供应商"类判断改为查 profile：现有平台上与改动前的
 // 国产厂商 / 国产厂商 ∪ OpenCode 判断逐一相同。
-func TestProviderProfileAccountPredicatesMatchLegacy(t *testing.T) {
+func TestProviderProfileAccountPredicatesMatchContract(t *testing.T) {
 	for _, platform := range platformProbeValues {
 		account := &Account{Platform: platform, Type: AccountTypeAPIKey}
 		// Cline 只有 Chat Completions 一个端点，按入站协议分流（其余入站转换）。
-		require.Equal(t, legacyIsCNProvider(platform) || platform == PlatformCline, account.RoutesProtocolByInbound(), platform)
-		require.Equal(t, legacyIsCNProvider(platform) || platform == PlatformOpenCodeGo || platform == PlatformCommandCode || platform == PlatformCline, account.IsMultiProtocolAPIKey(), platform)
+		require.Equal(t, expectedIsCNProvider(platform) || platform == PlatformCline || platform == PlatformRunningHub, account.RoutesProtocolByInbound(), platform)
+		require.Equal(t, expectedIsCNProvider(platform) || platform == PlatformOpenCodeGo || platform == PlatformCommandCode || platform == PlatformCline || platform == PlatformRunningHub, account.IsMultiProtocolAPIKey(), platform)
 	}
 	var nilAccount *Account
 	require.False(t, nilAccount.RoutesProtocolByInbound())

@@ -43,7 +43,7 @@
 - SMTP 仅恢复配置，未向任何收件人发送测试邮件；其他有差异的认证默认值、注册规则保留当前配置，尚未完成逐项合并判断。旧 admin_api_key 未恢复，避免重新启用旧管理密钥。
 - CC Switch 导入已移除固定 gpt-5.5 参数，不再替账号虚构默认模型；客户端需选择已验证模型。外部客户端自身默认值仍不受本站控制。
 - 当前 /v1/models 仍可能来源于本地白名单，不能作为上游权限保证；已实测可用模型不得仅因目录缺失删除。
-- RUN_MODE=simple：不是启用计费的标准运营模式。
+- RUN_MODE=standard（2026-10-30 已更正，历史 simple 模式说明失效）。
 - 本次不是全仓逐行或全平台回归审计，不能保证所有遗留代码绝无冲突。未执行上游生成压测、外部通知或账号刷新流程测试。
 
 ## 后续清理（未新增备份）
@@ -69,3 +69,7 @@
 - `tools/deploy-local.ps1` 增加非回环绑定校验：绑定到公网或局域网地址时，PostgreSQL、Redis、JWT 和 TOTP 密钥不得为空或使用占位值；回环本地部署行为不变。
 - 旧迁移文件、兼容字段、历史审计表、Mock 适配器、部署模板和文档未发现进入当前默认调用链的证据，继续保留。删除它们会破坏升级、回滚或测试路径，因此本次不清理。
 - 复核后的结论是：已清理生成缓存和失效测试断言；未发现可以安全删除的生产代码或当前业务数据。公网生产仍需单独配置 HTTPS、反向代理、限流和真实上游凭据，不能由本地复核替代。
+
+## 2026-10-30 baseline correction
+
+Historical counts above are dated snapshots, not current deployment instructions. The current runtime uses standard mode and additionally runs local object storage. Current database counts: 1 user, 1 upstream account, 3 API keys, 298 applied migrations.

@@ -6,43 +6,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 重构前各处手写的平台列表，作为平台清单派生结果的等价基准；重构后新登记的平台
-// （Command Code、Cline）按同类平台（OpenCode）的位置补入。
+// Explicit contract expectations cover the current platform registry and ordering.
 var (
-	legacyDisplayOrder = []string{
+	expectedDisplayOrder = []string{
 		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
-		PlatformCline,
+		PlatformCline, PlatformRunningHub,
 	}
-	legacyCompositePrecedence = []string{
+	expectedCompositePrecedence = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
-		PlatformCline,
+		PlatformCline, PlatformRunningHub,
 	}
-	legacyOpenAIGateway = []string{
+	expectedOpenAIGateway = []string{
 		PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,
 		PlatformCommandCode,
-		PlatformCline,
+		PlatformCline, PlatformRunningHub,
 	}
-	legacyCNProviders    = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax}
-	legacyLiteLLMByPlatf = map[string]string{
+	expectedCNProviders       = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax}
+	expectedLiteLLMByPlatform = map[string]string{
 		PlatformAnthropic: "anthropic", PlatformOpenAI: "openai", PlatformGemini: "gemini",
 		PlatformAntigravity: "anthropic", PlatformGrok: "xai", PlatformKimi: "moonshot",
 		PlatformZhipu: "zhipu", PlatformDeepseek: "deepseek", PlatformMiniMax: "minimax",
-		PlatformOpenCodeGo: "opencode-go", PlatformTypeSafe: "typesafe", PlatformCommandCode: "", PlatformCline: "",
+		PlatformOpenCodeGo: "opencode-go", PlatformTypeSafe: "typesafe", PlatformCommandCode: "", PlatformCline: "", PlatformRunningHub: "",
 	}
 )
 
-func TestPlatformListMatchesLegacyLists(t *testing.T) {
-	require.Equal(t, legacyDisplayOrder, ConcretePlatformIDs())
-	require.Equal(t, legacyCompositePrecedence, CompositePrecedencePlatformIDs())
-	require.Equal(t, legacyOpenAIGateway, PlatformIDsWhere(func(spec PlatformSpec) bool {
+func TestPlatformListMatchesContract(t *testing.T) {
+	require.Equal(t, expectedDisplayOrder, ConcretePlatformIDs())
+	require.Equal(t, expectedCompositePrecedence, CompositePrecedencePlatformIDs())
+	require.Equal(t, expectedOpenAIGateway, PlatformIDsWhere(func(spec PlatformSpec) bool {
 		return spec.Gateway == PlatformGatewayOpenAI
 	}))
-	require.Equal(t, legacyCNProviders, PlatformIDsWhere(func(spec PlatformSpec) bool { return spec.CNProvider }))
-	for platform, provider := range legacyLiteLLMByPlatf {
+	require.Equal(t, expectedCNProviders, PlatformIDsWhere(func(spec PlatformSpec) bool { return spec.CNProvider }))
+	for platform, provider := range expectedLiteLLMByPlatform {
 		spec, ok := LookupPlatform(platform)
 		require.True(t, ok, platform)
 		require.Equal(t, provider, spec.LiteLLMProvider, platform)
@@ -50,7 +49,7 @@ func TestPlatformListMatchesLegacyLists(t *testing.T) {
 }
 
 func TestPlatformListPredicates(t *testing.T) {
-	for _, platform := range legacyDisplayOrder {
+	for _, platform := range expectedDisplayOrder {
 		require.True(t, IsConcretePlatform(platform), platform)
 		require.True(t, IsGroupPlatform(platform), platform)
 		spec, ok := LookupPlatform(platform)

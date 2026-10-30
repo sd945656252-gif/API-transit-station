@@ -22,12 +22,6 @@ class RunningHubAdapter(Adapter):
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "Accept": "application/json"}
 
-    def _payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        copy = dict(payload)
-        model = str(copy.get("model", ""))
-        copy["model"] = self.model_map.get(model, model)
-        return copy
-
     async def models(self) -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             try:

@@ -33,7 +33,6 @@ backend/.gocache/
 # Node.js / Vue 前端
 # ===================
 node_modules/
-frontend/node_modules/
 frontend/dist/
 *.local
 *.tsbuildinfo
@@ -152,8 +151,6 @@ docs/screenshots/*
 !docs/screenshots/mobile-account-actions-menu.png
 !docs/screenshots/codex-referral-dialog.png
 !docs/screenshots/codex-referral-success.png
-.serena/
-.codex/
 frontend/coverage/
 aicodex
 output/
@@ -165,3 +162,12 @@ issues/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
 .local-backups/
+
+# Local object storage data and credentials
+.local-storage/
+
+# Adapter verification is part of the deliverable, not generated test data.
+!adapter-gateway/tests/
+!adapter-gateway/tests/*.py
+!adapter-gateway/scripts/
+!adapter-gateway/scripts/*.py

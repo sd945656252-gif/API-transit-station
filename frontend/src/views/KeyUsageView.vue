@@ -555,28 +555,49 @@ function getRingOffset(ring: RingItem): number {
   return CIRCUMFERENCE - (Math.min(ring.pct, 100) / 100) * CIRCUMFERENCE
 }
 
+let ringFrame: number | null = null
+let ringDelay: ReturnType<typeof setTimeout> | null = null
+let ringGeneration = 0
+let animationDisposed = false
+
+function stopRingAnimation() {
+  ringGeneration++
+  if (ringFrame !== null) cancelAnimationFrame(ringFrame)
+  if (ringDelay !== null) clearTimeout(ringDelay)
+  ringFrame = null
+  ringDelay = null
+}
+
 function triggerRingAnimation(items: RingItem[]) {
+  stopRingAnimation()
+  const generation = ringGeneration
+  const isCurrent = () => !animationDisposed && generation === ringGeneration
   ringAnimated.value = false
   displayPcts.value = items.map(() => 0)
 
   nextTick(() => {
-    requestAnimationFrame(() => {
-      setTimeout(() => {
+    if (!isCurrent()) return
+    ringFrame = requestAnimationFrame(() => {
+      ringFrame = null
+      if (!isCurrent()) return
+      ringDelay = setTimeout(() => {
+        ringDelay = null
+        if (!isCurrent()) return
         ringAnimated.value = true
-
-        // Animate percentage numbers
         const duration = 1000
         const startTime = performance.now()
         const targets = items.map(item => item.isBalance ? 0 : item.pct)
 
         function tick() {
+          ringFrame = null
+          if (!isCurrent()) return
           const elapsed = performance.now() - startTime
           const p = Math.min(elapsed / duration, 1)
           const ease = 1 - Math.pow(1 - p, 3)
           displayPcts.value = targets.map(target => Math.round(ease * target))
-          if (p < 1) requestAnimationFrame(tick)
+          if (p < 1) ringFrame = requestAnimationFrame(tick)
         }
-        requestAnimationFrame(tick)
+        ringFrame = requestAnimationFrame(tick)
       }, 50)
     })
   })
@@ -939,6 +960,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  animationDisposed = true
+  stopRingAnimation()
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>

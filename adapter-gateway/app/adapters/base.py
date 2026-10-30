@@ -15,6 +15,13 @@ class AdapterError(Exception):
 
 class Adapter(ABC):
     name: str
+    model_map: dict[str, str]
+
+    def _payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        copy = dict(payload)
+        model = str(copy.get("model", ""))
+        copy["model"] = self.model_map.get(model, model)
+        return copy
 
     @abstractmethod
     async def models(self) -> list[dict[str, Any]]:
