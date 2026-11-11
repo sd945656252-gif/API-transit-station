@@ -1,22 +1,70 @@
-name: Check official stable release
+name: Prepare managed stable release
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '3-58/5 * * * *'
+
+concurrency:
+  group: managed-stable-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  check:
+  prepare-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
-      - name: Report the latest official stable release
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Verify release and deployment contracts
+        run: python -m unittest discover -s deploy/managed-updater/tests -v
+      - name: Synchronize official stable release and preserve custom integrations
+        id: source
+        run: python tools/prepare-managed-release.py prepare
+      - name: Set up Docker Buildx
+        if: steps.source.outputs.publish == 'true'
+        uses: docker/setup-buildx-action@v3
+      - name: Build the exact prepared source
+        if: steps.source.outputs.publish == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: ${{ steps.source.outputs.image }}
+          outputs: type=docker,dest=${{ runner.temp }}/sub2api-image.tar
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.source.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: |
+            VERSION=${{ steps.source.outputs.version }}
+            COMMIT=${{ steps.source.outputs.revision }}
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+          cache-from: type=gha,scope=managed-stable
+          cache-to: type=gha,mode=max,scope=managed-stable
+      - name: Publish complete source and Docker image as one managed release
+        if: steps.source.outputs.publish == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          SOURCE_METADATA: ${{ steps.source.outputs.metadata }}
         shell: bash
         run: |
-          gh api repos/Wei-Shaw/sub2api/releases/latest --jq '"Official stable release: " + .tag_name + "\n" + .html_url' >> "$GITHUB_STEP_SUMMARY"
-          printf '\nInstalled official baseline: `%s`\n\nUse the administrator update button to merge, build, publish and deploy. This scheduled check never changes source or running containers.\n' "$(cat .upstream-ref)" >> "$GITHUB_STEP_SUMMARY"
+          docker load --input "$RUNNER_TEMP/sub2api-image.tar"
+          gzip -1 "$RUNNER_TEMP/sub2api-image.tar"
+          python tools/prepare-managed-release.py publish --metadata "$SOURCE_METADATA" --archive "$RUNNER_TEMP/sub2api-image.tar.gz"
+      - name: Already prepared
+        if: steps.source.outputs.publish != 'true'
+        run: echo 'The current source and official stable release are already published. No deployment was changed.' >> "$GITHUB_STEP_SUMMARY"

@@ -175,5 +175,7 @@ issues/
 # Adapter verification is part of the deliverable, not generated test data.
 !adapter-gateway/tests/
 !adapter-gateway/tests/*.py
+!deploy/managed-updater/tests/
+!deploy/managed-updater/tests/*.py
 !adapter-gateway/scripts/
 !adapter-gateway/scripts/*.py

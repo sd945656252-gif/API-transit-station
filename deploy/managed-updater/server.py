@@ -12,24 +12,23 @@ import os
 from pathlib import Path
 import re
 import socket
+import shutil
 import subprocess
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from release_protocol import GitHub, MANIFEST_NAME, RELEASE_PATTERN, validate_manifest, version_tuple
 
 STATE = Path('/state')
-REPO = STATE / 'repository'
 REPOSITORY = os.environ.get('CUSTOM_REPOSITORY', 'sd945656252-gif/API-transit-station')
 APP = os.environ.get('APP_CONTAINER', 'sub2api')
 IMAGE = os.environ.get('APP_IMAGE', 'sub2api-local:runninghub')
 OFFICIAL = 'Wei-Shaw/sub2api'
 LOCK = threading.RLock()
 CHECK_LOCK = threading.Lock()
-ACTIVE = {'queued', 'checking', 'syncing', 'building', 'publishing', 'deploying'}
+ACTIVE = {'queued', 'checking', 'downloading', 'verifying', 'loading', 'deploying'}
 JOB = {'state': 'idle', 'stage': 'idle'}
 CACHE = None
 CACHE_TIME = 0
@@ -46,6 +45,7 @@ def secret(name):
 
 TOKEN = secret('updater_token')
 GH_TOKEN = secret('github_token')
+API = GitHub(GH_TOKEN)
 
 
 def now():
@@ -66,7 +66,7 @@ def progress(stage, **fields):
         tmp.replace(STATE / 'job.json')
 
 
-def run(args, cwd=REPO, data=None, check=True, timeout=1800):
+def run(args, cwd=STATE, data=None, check=True, timeout=1800):
     result = subprocess.run(args, cwd=cwd, input=data, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, timeout=timeout)
     text = redact(result.stdout.decode('utf-8', errors='replace'))
@@ -81,34 +81,71 @@ def run(args, cwd=REPO, data=None, check=True, timeout=1800):
     return result.returncode, text.strip()
 
 
-def git(*args, **kwargs):
-    return run(['git', *args], **kwargs)
-
-
 def github(path, method='GET', payload=None):
-    body = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request('https://api.github.com/' + path, data=body, method=method,
-        headers={'Authorization': 'Bearer ' + GH_TOKEN, 'Accept': 'application/vnd.github+json',
-                 'User-Agent': 'Sub2API-Managed-Updater', 'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(f'GitHub API HTTP {error.code}; check token permissions, quota and connectivity') from None
+    return API.json(path, method, payload)
 
 
 def latest(force=False):
+    """One publication source for every installation; never merge or build here."""
     global CACHE, CACHE_TIME
     with CHECK_LOCK:
-        if not force and CACHE and time.monotonic() - CACHE_TIME < 300:
+        if not force and CACHE is not None and time.monotonic() - CACHE_TIME < 60:
             return copy.deepcopy(CACHE)
-        release = github(f'repos/{OFFICIAL}/releases/latest')
-        tag = release.get('tag_name', '')
-        if release.get('draft') or release.get('prerelease') or not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
-            raise RuntimeError('Official latest release is not a supported stable version')
-        CACHE = release
+        official = github(f'repos/{OFFICIAL}/releases/latest')
+        official_version = official['tag_name'].lstrip('v')
+        version_tuple(official_version)
+        releases = github(f'repos/{REPOSITORY}/releases?per_page=30')
+        release = next((r for r in releases if not r.get('draft') and not r.get('prerelease')
+                        and re.fullmatch(RELEASE_PATTERN, r.get('tag_name', ''))), None)
+        ready = None
+        if release:
+            assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}
+            metadata = assets.get(MANIFEST_NAME)
+            if not metadata:
+                raise RuntimeError('Published release manifest is missing')
+            manifest = validate_manifest(json.loads(API.asset(REPOSITORY, metadata['id'])), REPOSITORY, release['tag_name'])
+            for artifact in manifest['artifacts'].values():
+                remote = assets.get(artifact['name'])
+                if not remote or remote['size'] != artifact['size']:
+                    raise RuntimeError('Published release image is missing or incomplete')
+            tag_ref = github(f'repos/{REPOSITORY}/git/ref/tags/{release["tag_name"]}')['object']
+            if tag_ref.get('type') != 'commit' or tag_ref.get('sha') != manifest['commit']:
+                raise RuntimeError('Published release tag does not match its source commit')
+            ready = {'manifest': manifest, 'assets': assets, 'release': release}
+        runs = github(f'repos/{REPOSITORY}/actions/workflows/sync-upstream.yml/runs?branch=main&per_page=1')['workflow_runs']
+        run_info = runs[0] if runs else {}
+        pending = not ready or version_tuple(official_version) > version_tuple(ready['manifest']['version'])
+        preparation = {'state': 'ready' if ready else 'waiting', 'official_version': official_version,
+                       'url': run_info.get('html_url', ''), 'repository': REPOSITORY}
+        if run_info.get('status') in ('queued', 'in_progress', 'waiting', 'pending', 'requested'):
+            preparation['state'] = 'preparing'
+        elif run_info.get('conclusion') in ('failure', 'cancelled', 'timed_out', 'action_required'):
+            preparation['state'] = 'failed'
+        elif pending:
+            preparation['state'] = 'waiting'
+        CACHE = {'ready': ready, 'preparation': preparation}
         CACHE_TIME = time.monotonic()
         return copy.deepcopy(CACHE)
+
+
+def check_result(current, catalog):
+    version_tuple(current)
+    info = docker('GET', f'/containers/{APP}/json')
+    revision = (info['Config'].get('Labels') or {}).get('org.opencontainers.image.revision', '')
+    ready = catalog['ready']
+    manifest = ready['manifest'] if ready else None
+    result = {'current_version': current, 'latest_version': manifest['version'] if manifest else '',
+              'has_update': bool(manifest and manifest['commit'] != revision and
+                                 version_tuple(manifest['version']) >= version_tuple(current)),
+              'managed_updates': True, 'build_type': 'release', 'cached': False,
+              'managed_release': {'repository': REPOSITORY, 'current_revision': revision,
+                  'revision': manifest['commit'] if manifest else '',
+                  'preparation': catalog['preparation']}}
+    if ready:
+        release = ready['release']
+        result['release_info'] = {'name': release.get('name', ''), 'body': release.get('body', ''),
+            'published_at': release.get('published_at', ''), 'html_url': release.get('html_url', '')}
+    return result
 
 
 class DockerConnection(http.client.HTTPConnection):
@@ -136,98 +173,6 @@ def docker(method, path, payload=None, missing_ok=False):
         return json.loads(data) if data else None
     finally:
         connection.close()
-
-
-def contract_errors():
-    errors = []
-    contracts = json.loads(Path('/app/contracts.json').read_text(encoding='utf-8'))
-    for path, markers in contracts.items():
-        file = REPO / path
-        text = file.read_text(encoding='utf-8') if file.is_file() else ''
-        if any(marker not in text for marker in markers):
-            errors.append(path)
-    return errors
-
-
-def sync_release(tag):
-    if not (REPO / '.git').is_dir():
-        run(['git', 'clone', '--depth=1', '--no-tags', f'https://github.com/{REPOSITORY}.git', str(REPO)], cwd=STATE)
-    git('fetch', '--depth=1', '--no-tags', 'origin', 'main')
-    git('checkout', '-B', 'managed-update', 'origin/main')
-    # Only this disposable coordinator-owned clone is reset. Never a user's workspace.
-    if REPO.resolve() != Path('/state/repository'):
-        raise RuntimeError('Unsafe checkout path')
-    git('reset', '--hard', 'origin/main')
-    git('clean', '-fdx')
-    git('config', 'user.name', 'Sub2API Updater')
-    git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
-    git('remote', 'remove', 'upstream', check=False)
-    git('remote', 'add', 'upstream', f'https://github.com/{OFFICIAL}.git')
-    base = (REPO / '.upstream-ref').read_text(encoding='utf-8').strip()
-    if not re.fullmatch(r'[0-9a-f]{40}', base):
-        raise RuntimeError('Invalid official baseline; repair .upstream-ref before upgrading')
-    ref = github(f'repos/{OFFICIAL}/git/ref/tags/{tag}')['object']
-    for _ in range(4):
-        if ref.get('type') != 'tag':
-            break
-        ref = github(f'repos/{OFFICIAL}/git/tags/{ref["sha"]}')['object']
-    target = ref.get('sha', '')
-    if ref.get('type') != 'commit' or not re.fullmatch(r'[0-9a-f]{40}', target):
-        raise RuntimeError('Official release tag does not resolve to a commit')
-    if base == target:
-        return git('rev-parse', 'HEAD')[1], False
-    # Avoid downgrading an installation already based on a newer official commit.
-    comparison = github(f'repos/{OFFICIAL}/compare/{base}...{target}')
-    if comparison.get('status') == 'behind':
-        # Prior manual syncs may already include this release plus subsequent
-        # official metadata commits. Keep that baseline instead of downgrading.
-        return git('rev-parse', 'HEAD')[1], False
-    if comparison.get('status') != 'ahead':
-        raise RuntimeError('Official release is not newer than the installed official baseline')
-    git('fetch', '--depth=1', '--no-tags', 'upstream', base)
-    git('fetch', '--depth=1', '--no-tags', 'upstream', target)
-    migration_changes = git('diff', '--name-status', base, target, '--', 'backend/migrations')[1]
-    if any(line and not line.startswith('A\t') for line in migration_changes.splitlines()):
-        raise RuntimeError('An existing database migration changed; manual data compatibility review is required')
-    for line in migration_changes.splitlines():
-        path = line.split('\t')[-1]
-        sql = git('show', f'{target}:{path}')[1]
-        sql = re.sub(r'/\*.*?\*/|--[^\n]*', '', sql, flags=re.S)
-        if re.search(r'\b(DROP|TRUNCATE|DELETE|UPDATE|RENAME)\b|\bALTER\s+COLUMN\b', sql, re.I):
-            raise RuntimeError('New data-changing migration requires compatibility review: ' + path)
-    patch = subprocess.check_output(['git', 'diff', '--binary', base, target, '--', '.',
-        ':(exclude).github/workflows/**'], cwd=REPO)
-    code, output = run(['git', 'apply', '--3way', '--index', '--whitespace=nowarn', '-'], data=patch, check=False)
-    conflicts = git('diff', '--name-only', '--diff-filter=U')[1].splitlines()
-    if code and not conflicts:
-        raise RuntimeError('Official changes could not be applied: ' + output[-1200:])
-    for path in conflicts:
-        # Preserve all non-conflicting custom hunks. Within conflict hunks prefer
-        # the official side, then require the custom contracts and a real build.
-        stages = git('ls-files', '-u', '--', path)[1]
-        if all(f' {stage}\t' in stages for stage in (1, 2, 3)):
-            files = []
-            for stage in (2, 1, 3):
-                file = STATE / f'merge-{stage}'
-                file.write_bytes(subprocess.check_output(['git', 'show', f':{stage}:{path}'], cwd=REPO))
-                files.append(file)
-            merged = subprocess.run(['git', 'merge-file', '--theirs', '-p', *map(str, files)],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if merged.returncode != 0:
-                raise RuntimeError('Cannot resolve official conflict in ' + path)
-            (REPO / path).write_bytes(merged.stdout)
-            git('add', '--', path)
-        else:
-            # Add/delete or binary conflicts have ambiguous custom responsibilities.
-            raise RuntimeError('Manual repair required for add/delete or binary conflict: ' + path)
-    missing = contract_errors()
-    if missing:
-        raise RuntimeError('Official version needs custom integration repair: ' + ', '.join(missing))
-    (REPO / '.upstream-ref').write_text(target + '\n', encoding='utf-8')
-    git('add', '-A')
-    git('commit', '-m', f'chore: sync official {tag}, preserve custom integrations')
-    progress('syncing', conflicts_resolved=conflicts)
-    return git('rev-parse', 'HEAD')[1], True
 
 
 def health(name, expected=None, seconds=120):
@@ -322,44 +267,38 @@ def deploy(image, revision):
     run(['docker', 'tag', image, IMAGE], cwd=STATE)
 
 
-def worker():
-    published = False
+def worker(ready):
+    archive = STATE / ('image-' + JOB['id'] + '.tar.gz')
     try:
-        progress('checking', state='checking')
-        release = latest(force=True)
-        tag = release['tag_name']
-        progress('syncing', state='syncing', target_version=tag[1:])
-        revision, changed = sync_release(tag)
-        missing = contract_errors()
-        if missing:
-            raise RuntimeError('Custom integrations require repair: ' + ', '.join(missing))
-        progress('building', state='building', commit=revision)
-        image = 'sub2api-managed:' + revision[:12]
-        dockerfile = (REPO / 'Dockerfile').read_text(encoding='utf-8')
-        # Built-in BuildKit supports the same directives. Avoid an unnecessary
-        # Dockerfile frontend registry lookup, a common failure on this host.
-        dockerfile = '\n'.join(line for line in dockerfile.splitlines() if not line.startswith('# syntax=')) + '\n'
-        run(['docker', 'build', '--file', '-', '--label', f'org.opencontainers.image.revision={revision}',
-             '--build-arg', f'COMMIT={revision}', '--build-arg', f'VERSION={tag[1:]}', '-t', image, '.'],
-            data=dockerfile.encode(), timeout=3600)
-        progress('publishing', state='publishing')
-        # Preserve a repair branch and never force-push over concurrent user work.
-        branch = 'managed/update-' + JOB['id'][:12]
-        git('push', 'origin', f'HEAD:refs/heads/{branch}')
-        progress('publishing', repair_branch=branch)
-        if changed:
-            git('push', 'origin', 'HEAD:refs/heads/main')
-        else:
-            git('fetch', '--no-tags', 'origin', 'main')
-            if git('rev-parse', 'origin/main')[1] != revision:
-                raise RuntimeError('GitHub main changed during build; retry to include the latest custom work')
-        published = True
-        progress('deploying', state='deploying', github_published=True)
-        deploy(image, revision)
+        manifest = ready['manifest']
+        revision = manifest['commit']
+        progress('checking', state='checking', commit=revision, target_version=manifest['version'],
+                 release_tag=manifest['tag'], github_published=True)
+        engine = docker('GET', '/info')
+        architecture = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(engine['Architecture'], engine['Architecture'])
+        platform = engine['OSType'] + '/' + architecture
+        artifact = manifest['artifacts'].get(platform)
+        if not artifact:
+            raise RuntimeError('This release has no Docker image for ' + platform)
+        if shutil.disk_usage(STATE).free < artifact['size'] * 3 + 300_000_000:
+            raise RuntimeError('Insufficient disk space to download and load the release image')
+        progress('downloading', state='downloading')
+        API.asset(REPOSITORY, ready['assets'][artifact['name']]['id'], archive, artifact)
+        progress('verifying', state='verifying')
+        # The download completed only after checking its exact size and SHA-256.
+        progress('loading', state='loading')
+        run(['docker', 'load', '--input', str(archive)], cwd=STATE, timeout=1200)
+        image = docker('GET', '/images/' + artifact['image_id'] + '/json')
+        if (image['Config'].get('Labels') or {}).get('org.opencontainers.image.revision') != revision or \
+                image['Os'] + '/' + image['Architecture'] != platform:
+            raise RuntimeError('Loaded image source or platform does not match the release manifest')
+        progress('deploying', state='deploying')
+        deploy(artifact['image_id'], revision)
         progress('complete', state='succeeded', finished_at=now())
     except Exception as error:
-        progress('failed', state='failed', error=redact(error)[-4000:], github_published=published,
-                 finished_at=now())
+        progress('failed', state='failed', error=redact(error)[-4000:], finished_at=now())
+    finally:
+        archive.unlink(missing_ok=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -390,15 +329,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.path == '/check':
             params = urllib.parse.parse_qs(path.query)
             try:
-                release = latest(params.get('force') == ['true'])
-                current = params.get('current', [''])[0]
-                def version(value):
-                    return tuple(map(int, value.lstrip('v').split('.')))
-                return self.send(200, {'current_version': current, 'latest_version': release['tag_name'][1:],
-                    'has_update': version(current) < version(release['tag_name']), 'managed_updates': True,
-                    'build_type': 'release', 'cached': False, 'release_info': {
-                        'name': release.get('name', ''), 'body': release.get('body', ''),
-                        'published_at': release.get('published_at', ''), 'html_url': release.get('html_url', '')}})
+                catalog = latest(params.get('force') == ['true'])
+                return self.send(200, check_result(params.get('current', [''])[0], catalog))
             except Exception as error:
                 return self.send(502, {'error': redact(error)})
         return self.send(404, {'error': 'Not found'})
@@ -424,10 +356,26 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             if JOB['state'] in ACTIVE or JOB.get('operation_id') == key:
                 return self.send(202, copy.deepcopy(JOB))
+        try:
+            ready = latest(force=True)['ready']
+            if ready is None:
+                return self.send(409, {'error': 'GitHub has not published a complete managed Docker release yet'})
+            info = docker('GET', f'/containers/{APP}/json')
+            labels = info['Config'].get('Labels') or {}
+            if labels.get('org.opencontainers.image.revision') == ready['manifest']['commit']:
+                return self.send(409, {'error': 'This exact release is already installed'})
+            installed = labels.get('org.opencontainers.image.version')
+            if installed and version_tuple(installed) > version_tuple(ready['manifest']['version']):
+                return self.send(409, {'error': 'Refusing to downgrade the installed application'})
+        except Exception as error:
+            return self.send(502, {'error': redact(error)})
+        with LOCK:
+            if JOB['state'] in ACTIVE or JOB.get('operation_id') == key:
+                return self.send(202, copy.deepcopy(JOB))
             JOB.clear()
             JOB.update(id=uuid.uuid4().hex, operation_id=key, state='queued', stage='queued', started_at=now())
             progress('queued')
-            threading.Thread(target=worker, daemon=True).start()
+            threading.Thread(target=worker, args=(ready,), daemon=True).start()
             return self.send(202, copy.deepcopy(JOB))
 
 
@@ -437,7 +385,7 @@ if __name__ == '__main__':
     if saved.exists():
         JOB = json.loads(saved.read_text(encoding='utf-8'))
         if JOB.get('state') in ACTIVE:
-            # Never replay a build or push after restart. Reconcile a recorded
+            # Never replay a download after restart. Reconcile a recorded
             # container switch before accepting another job.
             message = 'Updater restarted; the unfinished update was not replayed.'
             if JOB.get('deployment_started'):

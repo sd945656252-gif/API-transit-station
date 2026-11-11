@@ -1,4 +1,6 @@
-param([string]$RuntimeRoot = (Split-Path -Parent $PSScriptRoot), [switch]$SkipBuild)
+param([string]$RuntimeRoot = (Split-Path -Parent $PSScriptRoot), [switch]$SkipBuild,
+    [string]$Repository = 'sd945656252-gif/API-transit-station',
+    [string]$AppContainer = 'sub2api', [string]$AppNetwork = 'sub2api_sub2api-network')
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = Split-Path -Parent $PSScriptRoot
@@ -38,6 +40,9 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Updater build failed; current application is unchanged.' }
 }
 $env:UPDATER_SECRETS_DIR = $secretDir
+$env:CUSTOM_REPOSITORY = $Repository
+$env:UPDATER_APP_CONTAINER = $AppContainer
+$env:UPDATER_APP_NETWORK = $AppNetwork
 & docker compose -p sub2api-managed -f (Join-Path $sourceRoot 'deploy/managed-updater/compose.yaml') up -d --no-build --wait
 if ($LASTEXITCODE -ne 0) { throw 'Updater did not start; current application is unchanged.' }
-Write-Host 'Private updater is running. Credentials were not uploaded. Submit an update from the administrator panel after the initial application deployment.'
+Write-Host 'Private updater is running. This installation reads the configured GitHub releases independently and only deploys after an administrator clicks update. Repository write permission is not required.'

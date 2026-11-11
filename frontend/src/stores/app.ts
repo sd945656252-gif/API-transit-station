@@ -10,7 +10,8 @@ import { i18n } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
   type VersionInfo,
-  type ReleaseInfo
+  type ReleaseInfo,
+  type ManagedReleaseInfo
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 
@@ -44,6 +45,7 @@ export const useAppStore = defineStore('app', () => {
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
   const managedUpdates = ref(false)
+  const managedRelease = ref<ManagedReleaseInfo | null>(null)
   const versionWarning = ref('')
   let versionFetchedAt = 0
 
@@ -252,6 +254,7 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         managed_updates: managedUpdates.value,
+        managed_release: managedRelease.value || undefined,
         warning: versionWarning.value || undefined,
         release_info: releaseInfo.value || undefined,
         cached: true
@@ -271,6 +274,7 @@ export const useAppStore = defineStore('app', () => {
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       managedUpdates.value = data.managed_updates === true
+      managedRelease.value = data.managed_release || null
       versionWarning.value = data.warning || ''
       versionFetchedAt = Date.now()
       releaseInfo.value = data.release_info || null
@@ -473,6 +477,7 @@ export const useAppStore = defineStore('app', () => {
     buildType,
     releaseInfo,
     managedUpdates,
+    managedRelease,
     versionWarning,
 
     // Computed

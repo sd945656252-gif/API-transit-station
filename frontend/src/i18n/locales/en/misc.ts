@@ -19,13 +19,16 @@ export default {
 
   // Version Badge
   managedUpdates: {
-    checking: 'Checking for official updates…',
-    description: 'Update the official core, preserve custom integrations, publish to GitHub and deploy Docker.',
-    updateNow: 'Update and deploy now', running: 'Updating…', checkFailed: 'Version check failed',
+    checking: 'Checking for prepared releases…',
+    description: 'GitHub prepares releases centrally. Updating affects only this installation and preserves its database and configuration.',
+    source: 'Release repository', installedRevision: 'Installed build', readyRevision: 'Prepared build',
+    officialCore: 'Official core', viewBuild: 'View GitHub build status',
+    preparation: { waiting: 'Waiting for GitHub to prepare a stable release', preparing: 'GitHub is checking, integrating or building', failed: 'GitHub release preparation failed; check the build details', ready: 'Managed release is ready' },
+    updateNow: 'Download and update this installation', running: 'Updating this installation…', checkFailed: 'Version check failed',
     statusUnavailable: 'Update status is temporarily unavailable. Please retry.',
-    publishedButFailed: 'Source was pushed to GitHub, but Docker deployment failed. Check the error and retry.',
-    failureHelp: 'Incomplete updates are never marked successful. Custom integration or migration issues require repair before retrying.',
-    stages: { idle: 'Waiting for update', queued: 'Update queued', checking: 'Fetching official stable release', syncing: 'Applying official changes and checking custom integrations', building: 'Building application image', publishing: 'Publishing to GitHub', deploying: 'Replacing application and checking health', complete: 'Update and deployment completed', failed: 'Update failed', interrupted: 'Update service was interrupted' }
+    publishedButFailed: 'The GitHub release is published, but this installation failed to update. Other computers are unaffected. Check the error and retry.',
+    failureHelp: 'Verification or deployment failures are never marked successful and never update other computers.',
+    stages: { idle: 'Waiting for update', queued: 'Local update queued', checking: 'Confirming a prepared GitHub release', downloading: 'Downloading the prepared Docker image', verifying: 'Image integrity verified', loading: 'Loading the verified image', deploying: 'Replacing this application and checking health', complete: 'This installation was updated', failed: 'This installation failed to update', interrupted: 'Update service was interrupted' }
   },
   version: {
     currentVersion: 'Current Version',

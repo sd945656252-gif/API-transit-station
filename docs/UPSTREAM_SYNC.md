@@ -1,20 +1,24 @@
-# 官方版本提醒与点击部署
+# 统一发布与各实例独立更新
 
-管理员版本面板检查 `Wei-Shaw/sub2api` 的最新正式 Release。页面可见时每分钟查询，更新器缓存五分钟；手动刷新绕过缓存。不是秒级推送，不跟踪未发布的 main 提交。查询失败显示原因，不显示“已是最新版”。
+所有部署检查同一个 `CUSTOM_REPOSITORY` 的已发布本站 Release。GitHub 工作流每五分钟检查 `Wei-Shaw/sub2api` 的正式 Release，本站 main 推送和手动运行也会触发。GitHub 调度、排队和构建均需要时间，不是秒级推送；不跟踪官方尚未发布的 main 提交。运行实例不需要公网回调地址。
 
-点击“立即更新并部署”会启动独立任务：获取正式版本 → 按 `.upstream-ref` 应用官方增量 → 构建定制镜像 → 正常推送本站 GitHub main → 替换应用容器 → 确认 Docker 健康状态和源码提交标识。页面显示真实阶段、结果和失败原因；重启应用不会终止更新器。不会把官方预编译二进制直接覆盖到定制应用中。
+发布顺序：GitHub 获取正式版本 → 按 `.upstream-ref` 合并官方增量 → 检查定制契约 → 在 GitHub 构建包含前端检查及 Go 编译的镜像 → 发布完整源码、Docker 镜像归档及 `managed-release.json`。只有构建和上传成功才将草稿 Release 正式发布。不使用官方预编译二进制覆盖本站定制功能。镜像归档保存在现有私有 GitHub Release，不将仓库或镜像公开，也不需要额外的 Docker Hub/GHCR 凭据。
 
-文本冲突只在冲突块优先官方，其余定制保留。RunningHub、生图比例和管理员菜单等使用 `deploy/managed-updater/contracts.json` 静态契约防止明显丢失，再要求真实构建通过。这不是所有功能的语义回归证明，也不是能够自动补修任意未来冲突的 AI。二进制、添加/删除冲突、契约丢失或构建失败会停止，补修后重试。构建通过后保留 `managed/update-*` 分支；构建前失败没有远程修复分支。不允许 force push；main 并发变更时停止并重试。
+管理员页面可见时每分钟检查，更新器缓存一分钟，手动刷新绕过缓存。页面区分 GitHub 准备中、准备失败、已就绪，以及本机下载、校验、加载和部署状态。本站构建按完整源码提交号识别，因此官方版本号相同的本站修复也能提醒更新。点击后只下载同一份已构建镜像，校验 SHA-256、大小、源提交标签、平台和不可变镜像 ID，再替换当前应用并确认健康；不在实例上合并、编译或推送 GitHub。
+
+电脑 A 和电脑 B 各自安装更新器并配置相同仓库，就会各自发现新版本。A 点击更新只影响 A；B 需要单独确认。两台各自保留本机数据库、配置、凭据和更新状态。仅下载过旧源码而未安装更新模块的部署不会自动收到提醒。当前发布 `linux/amd64` 镜像，适用于常见 Intel/AMD 电脑上的 Linux Docker；ARM 服务器会明确拒绝不匹配镜像，需要先扩展构建平台。
+
+文本冲突只在冲突块优先官方，其余定制保留。RunningHub、生图比例和管理员菜单等由 `deploy/managed-updater/contracts.json` 保护，再要求真实构建通过。这不是所有功能的语义回归证明，也不能自动补修任意未来冲突。二进制、添加/删除冲突、契约丢失或构建失败会停止。合并成功后保留 `managed/candidate-*` 分支，构建前的无法应用冲突保留在工作流诊断中。main 并发变更会拒绝发布并等待重试，禁止 force push。
 
 ## 安装与权限
 
-需要 Docker、现有 `sub2api` 应用和 `sub2api_sub2api-network` 网络，以及对本站仓库具备读写权限的 GitHub CLI 登录：
+每台电脑需要 Docker、现有 `sub2api` 应用和 `sub2api_sub2api-network` 网络，以及能读取本站私有仓库的 GitHub CLI 登录（或预先放入本机凭据文件）。实例只需要 Contents 和 Actions 读取权限，不需要仓库写入权限。GitHub 工作流使用内置 `GITHUB_TOKEN` 完成中央发布，不使用各台电脑的凭据：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/enable-managed-updates.ps1
 ```
 
-安装器将凭据写入本机 `.managed-updater/`（Git 和 Docker 构建上下文均忽略）；GitHub 凭据只给更新器，不进入浏览器和应用。不要提交该目录。Windows 下目录 ACL 限制为当前用户和 SYSTEM。`CUSTOM_REPOSITORY` 可指定自己的仓库。
+安装器将凭据写入本机 `.managed-updater/`（Git 和 Docker 构建上下文均忽略）；GitHub 凭据只给更新器，不进入浏览器和应用。不要提交该目录。Windows 下目录 ACL 限制为当前用户和 SYSTEM。脚本 `-Repository` 指定同一发布仓库，`-AppContainer` 和 `-AppNetwork` 指定当前安装的容器与网络，不绑定任何固定电脑 IP。两台电脑分别执行安装，不要复制正在运行的数据库卷或复用远程 Docker socket。
 
 更新器无宿主机端口，通过内部网络和独立 Bearer 凭据通信。应用端更新、状态和版本检查均经过现有管理员鉴权。更新器持有 Docker socket，具备宿主机 Docker 管理权限，必须作为可信运维服务维护。
 
@@ -24,12 +28,12 @@ powershell -ExecutionPolicy Bypass -File tools/enable-managed-updates.ps1
 
 独立状态卷 `sub2api_managed_updater_state` 保存任务结果和有界脱敏构建日志。可使用 `docker exec sub2api-updater cat /state/job.json`、`docker exec sub2api-updater tail -n 60 /state/build.log` 排查。不要公开完整容器 inspect、环境变量或凭据文件。
 
-构建和推送期间旧服务继续运行；切换应用有短暂中断。失败会尝试恢复确切的旧应用容器，成功部署也保留停止的 `sub2api-previous-*` 容器。更新器重启会核对已记录的切换结果或恢复旧容器，不自动重放未完成构建/推送。GitHub 已发布但部署失败会单独显示，可重试部署。
+GitHub 构建及实例下载期间旧服务继续运行；切换应用有短暂中断。失败会尝试恢复确切的旧应用容器，成功部署也保留停止的 `sub2api-previous-*` 容器。更新器重启会核对已记录的切换结果或恢复旧容器，不自动重放未完成更新。GitHub 已发布但某一实例部署失败会单独显示，不影响其他实例。仓库读取失败、镜像校验失败和未上传完整的草稿不会伪装成成功。
 
 更新器不重建 PostgreSQL/Redis、不删除数据卷。旧迁移被修改/删除，以及新增迁移中检测到的数据改写、删除等语句会暂停审核；此检查不保证所有迁移都可逆。**容器恢复不等于数据库回退**，新增迁移仍可能有不可逆影响，生产数据库应单独执行已验证的备份恢复流程。不要因应用回退而宣称数据已恢复。
 
-GitHub 网络、权限、分支保护、镜像依赖下载、磁盘空间或构建错误会导致更新失败并显示原因。GitHub 发布顺序在部署之前，两者并非跨系统原子事务。
+GitHub 网络、权限、Actions 配额、分支保护、构建依赖、磁盘空间或构建错误会导致准备或部署失败并显示状态。GitHub 发布和各实例部署不是跨系统原子事务。
 
-每日 GitHub 工作流只生成正式版本检查报告，不合并或部署，避免与管理员点击更新形成第二套权威更新来源。GitHub main 保存源码，本机 Docker 使用同一提交构建镜像；本流程不承诺自动发布 GHCR/Docker Hub 镜像。
+唯一源码同步和发布入口为 `.github/workflows/sync-upstream.yml` 与 `tools/prepare-managed-release.py`。更新器已移除旧的本机 Git 合并、镜像构建及远程推送实现，避免两台实例同时改写 main。版本清单只绑定源码和镜像，不含账号、API Key、数据库或本机配置。
 
 更新器自身的代码或静态契约改变时，重新运行安装脚本更新其镜像。历史容器、分支和镜像由管理员按运维留存策略管理，不自动删除数据卷。

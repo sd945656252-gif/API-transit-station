@@ -10,8 +10,8 @@ services:
       - no-new-privileges:true
     environment:
       CUSTOM_REPOSITORY: ${CUSTOM_REPOSITORY:-sd945656252-gif/API-transit-station}
-      APP_CONTAINER: sub2api
-      APP_IMAGE: sub2api-local:runninghub
+      APP_CONTAINER: ${UPDATER_APP_CONTAINER:-sub2api}
+      APP_IMAGE: ${UPDATER_APP_IMAGE:-sub2api-local:runninghub}
     secrets:
       - updater_token
       - github_token
@@ -32,8 +32,8 @@ secrets:
     file: ${UPDATER_SECRETS_DIR:-../../.managed-updater}/github-token
 volumes:
   updater_state:
-    name: sub2api_managed_updater_state
+    name: ${UPDATER_STATE_VOLUME:-sub2api_managed_updater_state}
 networks:
   app:
     external: true
-    name: sub2api_sub2api-network
+    name: ${UPDATER_APP_NETWORK:-sub2api_sub2api-network}

@@ -20,6 +20,18 @@ export interface VersionInfo {
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
   managed_updates?: boolean
+  managed_release?: ManagedReleaseInfo
+}
+
+export interface ManagedReleaseInfo {
+  repository: string
+  current_revision: string
+  revision: string
+  preparation: {
+    state: 'waiting' | 'preparing' | 'ready' | 'failed'
+    official_version: string
+    url: string
+  }
 }
 
 /**

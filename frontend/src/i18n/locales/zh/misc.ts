@@ -19,13 +19,16 @@ export default {
 
   // Version Badge
   managedUpdates: {
-    checking: '正在检查官方新版本…',
-    description: '更新官方内核并保留本站扩展，完成后同步 GitHub 并自动更新 Docker。',
-    updateNow: '立即更新并部署', running: '正在更新…', checkFailed: '版本检查未成功',
+    checking: '正在检查本站新版本…',
+    description: 'GitHub 统一准备新版。点击后仅更新当前部署，保留本机数据库和配置。',
+    source: '发布仓库', installedRevision: '当前本站构建', readyRevision: '已就绪构建',
+    officialCore: '官方内核', viewBuild: '查看 GitHub 构建状态',
+    preparation: { waiting: '等待 GitHub 准备正式版本', preparing: 'GitHub 正在检查、适配或构建', failed: 'GitHub 版本准备失败，请查看构建原因', ready: '本站版本已就绪' },
+    updateNow: '拉取并更新当前部署', running: '正在更新当前部署…', checkFailed: '版本检查未成功',
     statusUnavailable: '暂时无法获取更新状态，请稍后重试。',
-    publishedButFailed: '源码已推送 GitHub，但 Docker 部署未成功。请查看上方原因后重试。',
-    failureHelp: '未完成的更新不会标记成功。涉及定制适配或数据迁移的问题需要补修后重试。',
-    stages: { idle: '等待更新', queued: '更新已排队', checking: '获取官方正式版本', syncing: '官方优先合并并检查定制适配', building: '构建新版镜像', publishing: '推送到 GitHub', deploying: '替换应用容器并确认健康状态', complete: '更新和部署已完成', failed: '更新失败', interrupted: '更新服务曾中断' }
+    publishedButFailed: 'GitHub 版本已发布，但当前部署更新失败。其他电脑不受影响，请查看原因后重试。',
+    failureHelp: '校验失败或部署失败不会标记成功，也不会触发其他电脑更新。',
+    stages: { idle: '等待更新', queued: '本机更新已排队', checking: '确认 GitHub 已就绪版本', downloading: '下载构建好的 Docker 镜像', verifying: '镜像完整性校验通过', loading: '加载已验证镜像', deploying: '替换当前应用并确认健康状态', complete: '当前部署更新已完成', failed: '当前部署更新失败', interrupted: '更新服务曾中断' }
   },
   version: {
     currentVersion: '当前版本',

@@ -89,7 +89,7 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!loading && !hasUpdate && !appStore.versionWarning"
+                    v-if="!loading && !hasUpdate && !appStore.versionWarning && (!appStore.managedRelease || appStore.managedRelease.preparation.state === 'ready')"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -107,7 +107,7 @@
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
-                    loading ? t('managedUpdates.checking') : appStore.versionWarning ? t('managedUpdates.checkFailed') : hasUpdate
+                    loading ? t('managedUpdates.checking') : appStore.versionWarning ? t('managedUpdates.checkFailed') : appStore.managedRelease && appStore.managedRelease.preparation.state !== 'ready' ? t(`managedUpdates.preparation.${appStore.managedRelease.preparation.state}`) : hasUpdate
                       ? t('version.latestVersion') + ': v' + latestVersion
                       : t('version.upToDate')
                   }}
@@ -115,7 +115,7 @@
               </div>
 
               <p v-if="appStore.versionWarning" class="mb-3 whitespace-normal break-words rounded-lg bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">{{ appStore.versionWarning }}</p>
-              <ManagedUpdatePanel v-if="appStore.managedUpdates" :has-update="hasUpdate" @updated="refreshVersion(true)" />
+              <ManagedUpdatePanel v-if="appStore.managedUpdates" :has-update="hasUpdate" :release="appStore.managedRelease" @updated="refreshVersion(true)" />
               <template v-else>
               <!-- Priority 1: Update error (must check before hasUpdate) -->
               <div v-if="updateError" class="space-y-2">
