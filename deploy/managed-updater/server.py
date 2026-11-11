@@ -173,6 +173,10 @@ def sync_release(tag):
         return git('rev-parse', 'HEAD')[1], False
     # Avoid downgrading an installation already based on a newer official commit.
     comparison = github(f'repos/{OFFICIAL}/compare/{base}...{target}')
+    if comparison.get('status') == 'behind':
+        # Prior manual syncs may already include this release plus subsequent
+        # official metadata commits. Keep that baseline instead of downgrading.
+        return git('rev-parse', 'HEAD')[1], False
     if comparison.get('status') != 'ahead':
         raise RuntimeError('Official release is not newer than the installed official baseline')
     migration_changes = git('diff', '--name-status', base, target, '--', 'backend/migrations')[1]
