@@ -19,7 +19,7 @@ import time
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from release_protocol import (GitHub, MANIFEST_NAME, RELEASE_PATTERN, validate_manifest,
+from release_protocol import (GitHub, GitHubError, MANIFEST_NAME, RELEASE_PATTERN, validate_manifest,
                               version_tuple, archive_configuration, validate_loaded_image)
 
 STATE = Path('/state')
@@ -95,9 +95,15 @@ def latest(force=False):
         official = github(f'repos/{OFFICIAL}/releases/latest')
         official_version = official['tag_name'].lstrip('v')
         version_tuple(official_version)
-        releases = github(f'repos/{REPOSITORY}/releases?per_page=30')
-        release = next((r for r in releases if not r.get('draft') and not r.get('prerelease')
-                        and re.fullmatch(RELEASE_PATTERN, r.get('tag_name', ''))), None)
+        try:
+            release = github(f'repos/{REPOSITORY}/releases/latest')
+        except GitHubError as error:
+            if error.status != 404:
+                raise
+            release = None
+        if release and (release.get('draft') or release.get('prerelease') or
+                        not re.fullmatch(RELEASE_PATTERN, release.get('tag_name', ''))):
+            raise RuntimeError('The latest GitHub release is not a prepared managed release; check the publication workflow')
         ready = None
         if release:
             assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}

@@ -128,6 +128,9 @@ def prepare():
         names = {a['name'] for a in existing['assets'] if a.get('state') == 'uploaded'}
         if any(a['name'] not in names for a in manifest['artifacts'].values()):
             raise RuntimeError('Published Docker image is missing')
+        channel = API.json(f'repos/{REPOSITORY}/releases/latest')
+        if channel['id'] != existing['id']:
+            API.json(f'repos/{REPOSITORY}/releases/{existing["id"]}', 'PATCH', {'make_latest': 'true'})
         output(publish=False)
         return
     git('push', 'origin', f'HEAD:refs/heads/managed/candidate-{revision[:12]}')

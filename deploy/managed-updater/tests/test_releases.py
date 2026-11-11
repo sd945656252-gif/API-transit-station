@@ -125,6 +125,31 @@ class IndependentInstallationTests(unittest.TestCase):
             self.assertFalse(server.check_result('0.2.21', catalog)['has_update'])
         self.assertTrue(computer_b['has_update'])
 
+    def test_catalog_uses_github_latest_channel_instead_of_release_list_order(self):
+        server = self.server
+        data = manifest()
+        artifact = data['artifacts']['linux/amd64']
+        release = {'tag_name': data['tag'], 'assets': [
+            {'name': 'managed-release.json', 'id': 1, 'state': 'uploaded'},
+            {'name': artifact['name'], 'id': 2, 'state': 'uploaded', 'size': artifact['size']}]}
+        paths = []
+        def github(path):
+            paths.append(path)
+            if path == 'repos/' + server.OFFICIAL + '/releases/latest':
+                return {'tag_name': 'v0.2.21'}
+            if path == 'repos/' + REPOSITORY + '/releases/latest':
+                return release
+            if '/git/ref/tags/' in path:
+                return {'object': {'type': 'commit', 'sha': COMMIT}}
+            if '/actions/workflows/' in path:
+                return {'workflow_runs': []}
+            raise AssertionError('Unexpected GitHub resource: ' + path)
+        with patch.object(server, 'REPOSITORY', REPOSITORY), patch.object(server, 'github', side_effect=github), \
+                patch.object(server.API, 'asset', return_value=json.dumps(data).encode()):
+            result = server.latest(force=True)
+        self.assertEqual(result['ready']['manifest']['commit'], COMMIT)
+        self.assertFalse(any('/releases?' in path for path in paths))
+
     def test_no_prepared_image_does_not_offer_update(self):
         with patch.object(self.server, 'docker', return_value={'Config': {'Labels': {}}}):
             result = self.server.check_result('0.2.21', {'ready': None, 'preparation': {'state': 'preparing'}})
