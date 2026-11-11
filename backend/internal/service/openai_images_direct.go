@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -60,7 +61,7 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 			prompt = rawPrompt
 		}
 	}
-	payload["prompt"] = prompt
+	payload["prompt"] = openAIImagesAspectRatioPrompt(prompt, parsed.AspectRatio)
 	for _, field := range []struct {
 		key   string
 		value string
@@ -216,6 +217,10 @@ func (s *OpenAIGatewayService) handleCodexDirectImagesNonStreamingResponse(resp 
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, err
 	}
+	slog.Info("openai_images_upstream_result_parameters",
+		"size", gjson.GetBytes(body, "size").String(),
+		"quality", gjson.GetBytes(body, "quality").String(),
+		"actual_sizes", openAIResponsesImageResultSizes(results))
 	usage, _ := codexDirectImagesUsage(body)
 	if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 		observer.Observe(gjson.GetBytes(body, "model").String(), true)

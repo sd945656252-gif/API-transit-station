@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -364,6 +365,7 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
+	prompt = openAIImagesAspectRatioPrompt(prompt, parsed.AspectRatio)
 
 	inputImages := make([]string, 0, len(parsed.InputImageURLs)+len(parsed.Uploads))
 	for _, imageURL := range parsed.InputImageURLs {
@@ -1853,6 +1855,14 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	} else {
 		upstreamReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	}
+	parameterPrefix := "tools.0."
+	if direct {
+		parameterPrefix = ""
+	}
+	slog.Info("openai_images_upstream_parameters",
+		"endpoint", upstreamReq.URL.Path,
+		"size", gjson.GetBytes(responsesBody, parameterPrefix+"size").String(),
+		"quality", gjson.GetBytes(responsesBody, parameterPrefix+"quality").String())
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

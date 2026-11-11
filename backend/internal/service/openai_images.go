@@ -82,6 +82,7 @@ type OpenAIImagesRequest struct {
 	Stream             bool
 	N                  int
 	Size               string
+	AspectRatio        string
 	ExplicitSize       bool
 	SizeTier           string
 	ResponseFormat     string
@@ -272,6 +273,16 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 		req.Size = strings.TrimSpace(sizeResult.String())
 		req.ExplicitSize = req.Size != ""
 	}
+	if ratio := gjson.GetBytes(body, "aspect_ratio"); ratio.Exists() {
+		if ratio.Type != gjson.String {
+			return fmt.Errorf("aspect_ratio must be a width:height string")
+		}
+		var err error
+		req.AspectRatio, err = normalizeOpenAIImagesAspectRatio(ratio.String())
+		if err != nil {
+			return err
+		}
+	}
 	req.ResponseFormat = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "response_format").String()))
 	req.Quality = strings.TrimSpace(gjson.GetBytes(body, "quality").String())
 	req.Background = strings.TrimSpace(gjson.GetBytes(body, "background").String())
@@ -398,6 +409,12 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 		case "size":
 			req.Size = value
 			req.ExplicitSize = value != ""
+		case "aspect_ratio":
+			var err error
+			req.AspectRatio, err = normalizeOpenAIImagesAspectRatio(value)
+			if err != nil {
+				return err
+			}
 		case "response_format":
 			req.ResponseFormat = strings.ToLower(value)
 		case "stream":
