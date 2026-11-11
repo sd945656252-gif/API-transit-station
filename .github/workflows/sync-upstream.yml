@@ -29,69 +29,54 @@ jobs:
           git remote add upstream https://github.com/Wei-Shaw/sub2api.git
           git fetch --no-tags upstream main
 
-      - name: Apply upstream update without changing main
-        id: merge
+      - name: Apply official changes without replacing custom workflows
+        id: sync
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="sync/upstream-${GITHUB_RUN_ID}"
-          custom_base="$(git rev-parse HEAD)"
           upstream_sha="$(git rev-parse upstream/main)"
+          previous_sha="$(cat .upstream-ref 2>/dev/null || true)"
 
-          if git merge-base HEAD upstream/main >/dev/null 2>&1; then
-            git switch -c "$branch"
-            if ! git merge --no-commit --no-ff -X ours upstream/main; then
-              git merge --abort
-              echo "官方更新存在无法自动解决的冲突，已停止同步；main 未修改。" >&2
-              exit 1
-            fi
-            if git diff --quiet HEAD --; then
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-              echo "官方没有新的可合并内容。"
-              exit 0
-            fi
-            git add -A
-            git commit -m "chore: sync official upstream"
-          else
-            if [[ ! -f .github/upstream-custom.patch ]]; then
-              echo "初始同步补丁缺失，无法把仓库迁移到官方历史。" >&2
-              exit 1
-            fi
-            cp .github/upstream-custom.patch "$RUNNER_TEMP/upstream-custom.patch"
-            git switch --detach "$upstream_sha"
-            git switch -c "$branch"
-            if ! git apply --3way --whitespace=nowarn "$RUNNER_TEMP/upstream-custom.patch"; then
-              echo "定制改动与官方代码冲突，已停止同步；main 未修改。" >&2
-              exit 1
-            fi
-            rm -f .github/upstream-custom.patch
-            printf '%s\n' "$upstream_sha" > .upstream-ref
-            git add -A
-            while read -r mode type blob path; do
-              git update-index --add --cacheinfo "$mode" "$blob" "$path"
-            done < <(git ls-tree -r "$custom_base" .github/workflows)
-            git diff --cached --quiet "$custom_base" -- .github/workflows || { echo "Custom workflow files changed during bootstrap" >&2; exit 1; }
-            tree="$(git write-tree)"
-            commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base")"
-            git update-ref HEAD "$commit"
+          if [[ -z "$previous_sha" ]] || ! git fetch --no-tags upstream "$previous_sha"; then
+            echo "缺少有效的 .upstream-ref 或官方基线无法读取，停止同步。" >&2
+            exit 1
+          fi
+          if [[ "$previous_sha" == "$upstream_sha" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "官方没有新的可合并内容。"
+            exit 0
           fi
 
+          git switch -c "$branch"
+          git diff --binary "$previous_sha" "$upstream_sha" -- . ':(exclude).github/workflows/**' > "$RUNNER_TEMP/upstream.patch"
+          if [[ -s "$RUNNER_TEMP/upstream.patch" ]] && ! git apply --3way --whitespace=nowarn "$RUNNER_TEMP/upstream.patch"; then
+            echo "官方改动与定制代码存在冲突；main 未修改。" >&2
+            exit 1
+          fi
+          printf '%s\n' "$upstream_sha" > .upstream-ref
+          git add -A
+          if git diff --cached --quiet HEAD --; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "没有新的官方代码变更。"
+            exit 0
+          fi
+          git commit -m "chore: sync official upstream"
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Push sync branch
-        if: steps.merge.outputs.changed == 'true'
-        run: git push --set-upstream origin "${{ steps.merge.outputs.branch }}"
+        if: steps.sync.outputs.changed == 'true'
+        run: git push --set-upstream origin "${{ steps.sync.outputs.branch }}"
 
       - name: Open review pull request
-        if: steps.merge.outputs.changed == 'true'
+        if: steps.sync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr create \
             --base main \
-            --head "${{ steps.merge.outputs.branch }}" \
+            --head "${{ steps.sync.outputs.branch }}" \
             --title "chore: sync official upstream" \
-            --body "官方更新已移植到临时分支。请检查差异并等待 CI 通过后再合并。"
-
+            --body "官方提交增量已移植到临时分支。请检查差异并等待 CI 通过后再合并；冲突时 main 保持不变。"
