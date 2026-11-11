@@ -29,23 +29,46 @@ jobs:
           git remote add upstream https://github.com/Wei-Shaw/sub2api.git
           git fetch --no-tags upstream main
 
-      - name: Merge upstream without changing main
+      - name: Apply upstream update without changing main
         id: merge
         shell: bash
         run: |
           branch="sync/upstream-${GITHUB_RUN_ID}"
-          git switch -c "$branch"
-          if ! git merge --no-commit --no-ff -X ours upstream/main; then
-            git merge --abort
-            echo "官方更新存在无法自动解决的冲突，已停止同步；main 未修改。" >&2
-            exit 1
+          custom_base="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse upstream/main)"
+
+          if git merge-base HEAD upstream/main >/dev/null 2>&1; then
+            git switch -c "$branch"
+            if ! git merge --no-commit --no-ff -X ours upstream/main; then
+              git merge --abort
+              echo "官方更新存在无法自动解决的冲突，已停止同步；main 未修改。" >&2
+              exit 1
+            fi
+            if git diff --quiet HEAD --; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              echo "官方没有新的可合并内容。"
+              exit 0
+            fi
+            git add -A
+            git commit -m "chore: sync official upstream"
+          else
+            if [[ ! -f .github/upstream-custom.patch ]]; then
+              echo "初始同步补丁缺失，无法把仓库迁移到官方历史。" >&2
+              exit 1
+            fi
+            cp .github/upstream-custom.patch "$RUNNER_TEMP/upstream-custom.patch"
+            git switch --detach "$upstream_sha"
+            git switch -c "$branch"
+            if ! git apply --3way --whitespace=nowarn "$RUNNER_TEMP/upstream-custom.patch"; then
+              echo "定制改动与官方代码冲突，已停止同步；main 未修改。" >&2
+              exit 1
+            fi
+            git add -A
+            tree="$(git write-tree)"
+            commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base" -p "$upstream_sha")"
+            git update-ref HEAD "$commit"
           fi
-          if git diff --quiet HEAD --; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "官方没有新的可合并内容。"
-            exit 0
-          fi
-          git commit -m "chore: sync official upstream"
+
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
@@ -62,4 +85,4 @@ jobs:
             --base main \
             --head "${{ steps.merge.outputs.branch }}" \
             --title "chore: sync official upstream" \
-            --body "官方更新已合并到临时分支。冲突区域优先保留本仓库定制；请检查差异并等待 CI 通过后再合并。"
+            --body "官方更新已移植到临时分支。请检查差异并等待 CI 通过后再合并。"
