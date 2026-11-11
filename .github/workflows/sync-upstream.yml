@@ -65,7 +65,7 @@ jobs:
               echo "定制改动与官方代码冲突，已停止同步；main 未修改。" >&2
               exit 1
             fi
-            git checkout -f "$custom_base" -- .github/workflows
+            git restore --source="$custom_base" --staged --worktree -- .github/workflows
             rm -f .github/upstream-custom.patch
             printf '%s\n' "$upstream_sha" > .upstream-ref
             git add -A
