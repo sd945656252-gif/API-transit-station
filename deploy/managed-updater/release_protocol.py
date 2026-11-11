@@ -68,7 +68,8 @@ class GitHub:
         self.opener = urllib.request.build_opener(SafeRedirect())
 
     def open(self, path, accept='application/vnd.github+json', method='GET', payload=None):
-        if not path.startswith('repos/') or '..' in path or path.startswith('/'):
+        segments = urllib.parse.unquote(path.split('?', 1)[0]).split('/')
+        if not path.startswith('repos/') or any(part in ('.', '..') for part in segments):
             raise ValueError('Invalid GitHub API resource')
         headers = {'Accept': accept, 'User-Agent': 'Sub2API-Managed-Releases',
                    'X-GitHub-Api-Version': '2022-11-28', 'Cache-Control': 'no-cache'}

@@ -37,6 +37,13 @@ def load_server():
 
 
 class ReleaseContractTests(unittest.TestCase):
+    def test_commit_comparison_is_valid_but_directory_traversal_is_not(self):
+        client = GitHub('test')
+        client.opener.open = Mock(return_value=io.BytesIO(b'{}'))
+        self.assertEqual(client.json('repos/example/gateway/compare/' + 'a' * 40 + '...' + 'b' * 40), {})
+        with self.assertRaises(ValueError):
+            client.open('repos/example/../other')
+
     def test_complete_repository_owned_release_is_accepted(self):
         self.assertEqual(validate_manifest(manifest(), REPOSITORY)['commit'], COMMIT)
 
