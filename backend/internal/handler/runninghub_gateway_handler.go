@@ -136,7 +136,9 @@ func (h *RunningHubGatewayHandler) proxy(c *gin.Context, upstreamPath string, bi
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "upstream_error", "message": "RunningHub request failed"}})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	for key, values := range resp.Header {
 		if strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "Transfer-Encoding") {
 			continue
