@@ -18,7 +18,7 @@ services:
   sub2api:
     image: weishaw/sub2api:latest
     container_name: sub2api
-    restart: unless-stopped
+    restart: always
     security_opt:
       - no-new-privileges:true
     ulimits:
@@ -234,7 +234,7 @@ services:
   postgres:
     image: postgres:18-alpine
     container_name: sub2api-postgres
-    restart: unless-stopped
+    restart: always
     ulimits:
       nofile:
         soft: 100000
@@ -280,7 +280,7 @@ services:
   redis:
     image: redis:8-alpine
     container_name: sub2api-redis
-    restart: unless-stopped
+    restart: always
     ulimits:
       nofile:
         soft: 100000
@@ -323,7 +323,7 @@ services:
     build:
       context: ./adapter-gateway
     container_name: sub2api-adapter-gateway
-    restart: unless-stopped
+    restart: always
     environment:
       - ADAPTER_PROVIDER=${ADAPTER_PROVIDER:-openai-compatible}
       - ADAPTER_GATEWAY_API_KEY=${ADAPTER_GATEWAY_API_KEY:-}
