@@ -66,9 +66,11 @@ jobs:
               exit 1
             fi
             git checkout "$custom_base" -- .github/workflows
+            rm -f .github/upstream-custom.patch
+            printf '%s\n' "$upstream_sha" > .upstream-ref
             git add -A
             tree="$(git write-tree)"
-            commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base" -p "$upstream_sha")"
+            commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base")"
             git update-ref HEAD "$commit"
           fi
 
