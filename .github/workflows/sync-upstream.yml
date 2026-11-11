@@ -65,6 +65,7 @@ jobs:
               echo "定制改动与官方代码冲突，已停止同步；main 未修改。" >&2
               exit 1
             fi
+            git checkout "$custom_base" -- .github/workflows
             git add -A
             tree="$(git write-tree)"
             commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base" -p "$upstream_sha")"
