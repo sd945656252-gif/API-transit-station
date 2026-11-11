@@ -19,6 +19,7 @@ export default {
 
   // Version Badge
   managedUpdates: {
+    checking: 'Checking for official updates…',
     description: 'Update the official core, preserve custom integrations, publish to GitHub and deploy Docker.',
     updateNow: 'Update and deploy now', running: 'Updating…', checkFailed: 'Version check failed',
     statusUnavailable: 'Update status is temporarily unavailable. Please retry.',

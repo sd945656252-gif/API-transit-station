@@ -33,6 +33,7 @@ const error = computed(() => requestError.value || (job.value?.state === 'failed
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let lastFinished = ''
+let statusLoaded = false
 
 function message(error: unknown): string {
   const value = error as { response?: { data?: { message?: string } }; message?: string }
@@ -49,8 +50,11 @@ async function poll() {
     connectionError.value = ''
     if (status.state === 'succeeded' && lastFinished !== status.id) {
       lastFinished = status.id || ''
-      emit('updated')
+      // Loading historical success is not a new completion. Refreshing here
+      // used to remount this panel and repeat the same notification forever.
+      if (statusLoaded) emit('updated')
     }
+    statusLoaded = true
   } catch (error) {
     if (disposed) return
     // A Docker replacement temporarily disconnects this application. Continue
@@ -70,6 +74,7 @@ async function start() {
     const result = await performUpdate()
     if (!result.managed || !result.job) throw new Error(t('managedUpdates.statusUnavailable'))
     job.value = result.job
+    statusLoaded = true
     await poll()
   } catch (error) {
     requestError.value = message(error)

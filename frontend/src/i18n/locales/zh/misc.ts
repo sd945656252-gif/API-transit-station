@@ -19,6 +19,7 @@ export default {
 
   // Version Badge
   managedUpdates: {
+    checking: '正在检查官方新版本…',
     description: '更新官方内核并保留本站扩展，完成后同步 GitHub 并自动更新 Docker。',
     updateNow: '立即更新并部署', running: '正在更新…', checkFailed: '版本检查未成功',
     statusUnavailable: '暂时无法获取更新状态，请稍后重试。',

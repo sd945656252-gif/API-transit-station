@@ -57,8 +57,8 @@
           </div>
 
           <div class="p-4">
-            <!-- Loading state -->
-            <div v-if="loading" class="flex items-center justify-center py-6">
+            <!-- Keep the current version and update panel mounted on refresh. -->
+            <div v-if="loading && !currentVersion" class="flex items-center justify-center py-6">
               <svg class="h-6 w-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
                 <circle
                   class="opacity-25"
@@ -89,7 +89,7 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!hasUpdate && !appStore.versionWarning"
+                    v-if="!loading && !hasUpdate && !appStore.versionWarning"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -107,7 +107,7 @@
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
-                    appStore.versionWarning ? t('managedUpdates.checkFailed') : hasUpdate
+                    loading ? t('managedUpdates.checking') : appStore.versionWarning ? t('managedUpdates.checkFailed') : hasUpdate
                       ? t('version.latestVersion') + ': v' + latestVersion
                       : t('version.upToDate')
                   }}
