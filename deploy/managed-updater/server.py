@@ -166,9 +166,14 @@ def sync_release(tag):
     base = (REPO / '.upstream-ref').read_text(encoding='utf-8').strip()
     if not re.fullmatch(r'[0-9a-f]{40}', base):
         raise RuntimeError('Invalid official baseline; repair .upstream-ref before upgrading')
-    git('fetch', '--depth=1', '--no-tags', 'upstream', base)
-    git('fetch', '--depth=1', '--no-tags', 'upstream', f'refs/tags/{tag}:refs/managed-upstream/{tag}')
-    target = git('rev-parse', f'refs/managed-upstream/{tag}^{{commit}}')[1]
+    ref = github(f'repos/{OFFICIAL}/git/ref/tags/{tag}')['object']
+    for _ in range(4):
+        if ref.get('type') != 'tag':
+            break
+        ref = github(f'repos/{OFFICIAL}/git/tags/{ref["sha"]}')['object']
+    target = ref.get('sha', '')
+    if ref.get('type') != 'commit' or not re.fullmatch(r'[0-9a-f]{40}', target):
+        raise RuntimeError('Official release tag does not resolve to a commit')
     if base == target:
         return git('rev-parse', 'HEAD')[1], False
     # Avoid downgrading an installation already based on a newer official commit.
@@ -179,6 +184,8 @@ def sync_release(tag):
         return git('rev-parse', 'HEAD')[1], False
     if comparison.get('status') != 'ahead':
         raise RuntimeError('Official release is not newer than the installed official baseline')
+    git('fetch', '--depth=1', '--no-tags', 'upstream', base)
+    git('fetch', '--depth=1', '--no-tags', 'upstream', target)
     migration_changes = git('diff', '--name-status', base, target, '--', 'backend/migrations')[1]
     if any(line and not line.startswith('A\t') for line in migration_changes.splitlines()):
         raise RuntimeError('An existing database migration changed; manual data compatibility review is required')
