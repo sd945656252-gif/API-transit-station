@@ -1,16 +1,18 @@
 import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch, Mock
 import urllib.request
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
-from release_protocol import GitHub, SafeRedirect, validate_manifest
+from release_protocol import GitHub, SafeRedirect, validate_manifest, archive_configuration, validate_loaded_image
 
 REPOSITORY = 'example/gateway'
 COMMIT = 'a' * 40
@@ -37,6 +39,31 @@ def load_server():
 
 
 class ReleaseContractTests(unittest.TestCase):
+    def test_archive_identity_is_portable_across_docker_image_stores(self):
+        config = {'os': 'linux', 'architecture': 'amd64', 'rootfs': {'diff_ids': ['sha256:layer']},
+                  'config': {'Labels': {'org.opencontainers.image.revision': COMMIT}, 'Cmd': ['/app/sub2api']}}
+        raw = json.dumps(config).encode()
+        digest = 'sha256:' + hashlib.sha256(raw).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'image.tar.gz'
+            with tarfile.open(path, 'w:gz') as archive:
+                entries = {'manifest.json': json.dumps([{'Config': 'config.json',
+                    'RepoTags': ['sub2api-managed:' + COMMIT]}]).encode(), 'config.json': raw}
+                for name, content in entries.items():
+                    member = tarfile.TarInfo(name)
+                    member.size = len(content)
+                    archive.addfile(member, io.BytesIO(content))
+            archived = archive_configuration(path, COMMIT, digest)
+            for local_id in (digest, 'sha256:' + 'f' * 64):
+                image = {'Id': local_id, 'Os': 'linux', 'Architecture': 'amd64',
+                         'RootFS': {'Layers': ['sha256:layer']}, 'Config': config['config']}
+                self.assertEqual(validate_loaded_image(image, archived, 'linux/amd64'), local_id)
+            image['RootFS']['Layers'] = ['sha256:wrong']
+            with self.assertRaisesRegex(ValueError, 'layers'):
+                validate_loaded_image(image, archived, 'linux/amd64')
+            with self.assertRaisesRegex(ValueError, 'digest'):
+                archive_configuration(path, COMMIT, 'sha256:' + '0' * 64)
+
     def test_commit_comparison_is_valid_but_directory_traversal_is_not(self):
         client = GitHub('test')
         client.opener.open = Mock(return_value=io.BytesIO(b'{}'))

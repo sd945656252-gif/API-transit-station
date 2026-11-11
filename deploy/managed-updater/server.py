@@ -19,7 +19,8 @@ import time
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from release_protocol import GitHub, MANIFEST_NAME, RELEASE_PATTERN, validate_manifest, version_tuple
+from release_protocol import (GitHub, MANIFEST_NAME, RELEASE_PATTERN, validate_manifest,
+                              version_tuple, archive_configuration, validate_loaded_image)
 
 STATE = Path('/state')
 REPOSITORY = os.environ.get('CUSTOM_REPOSITORY', 'sd945656252-gif/API-transit-station')
@@ -286,14 +287,13 @@ def worker(ready):
         API.asset(REPOSITORY, ready['assets'][artifact['name']]['id'], archive, artifact)
         progress('verifying', state='verifying')
         # The download completed only after checking its exact size and SHA-256.
+        archived = archive_configuration(archive, revision, artifact['image_id'])
         progress('loading', state='loading')
         run(['docker', 'load', '--input', str(archive)], cwd=STATE, timeout=1200)
-        image = docker('GET', '/images/' + artifact['image_id'] + '/json')
-        if (image['Config'].get('Labels') or {}).get('org.opencontainers.image.revision') != revision or \
-                image['Os'] + '/' + image['Architecture'] != platform:
-            raise RuntimeError('Loaded image source or platform does not match the release manifest')
+        image = docker('GET', '/images/' + archived['tag'] + '/json')
+        local_image_id = validate_loaded_image(image, archived, platform)
         progress('deploying', state='deploying')
-        deploy(artifact['image_id'], revision)
+        deploy(local_image_id, revision)
         progress('complete', state='succeeded', finished_at=now())
     except Exception as error:
         progress('failed', state='failed', error=redact(error)[-4000:], finished_at=now())

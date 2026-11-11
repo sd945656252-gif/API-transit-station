@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import tarfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,10 +39,53 @@ def validate_manifest(data, repository, release_tag=None):
         if not re.fullmatch(r'[0-9a-f]{64}', artifact.get('sha256', '')):
             raise ValueError('Image checksum is missing')
         if not re.fullmatch(r'sha256:[0-9a-f]{64}', artifact.get('image_id', '')):
-            raise ValueError('Immutable Docker image ID is missing')
+            raise ValueError('Immutable Docker configuration digest is missing')
         if type(artifact.get('size')) is not int or not 0 < artifact['size'] <= 2_000_000_000:
             raise ValueError('Image asset size is invalid')
     return data
+
+
+def archive_configuration(path, commit, expected_digest=None):
+    """Docker classic and containerd stores expose different image IDs.
+
+    The archived configuration digest and layer digests are portable identities.
+    Read members directly; never extract archive paths onto the host filesystem.
+    """
+    def read_member(archive, name):
+        members = [member for member in archive.getmembers() if member.name == name]
+        if len(members) != 1 or not members[0].isfile() or members[0].size > 2_000_000:
+            raise ValueError('Image archive metadata is missing, duplicated or too large')
+        return archive.extractfile(members[0]).read()
+    with tarfile.open(path, 'r:*') as archive:
+        manifests = json.loads(read_member(archive, 'manifest.json'))
+        if not isinstance(manifests, list) or len(manifests) != 1:
+            raise ValueError('Expected exactly one image in the Docker archive')
+        entry = manifests[0]
+        tag = 'sub2api-managed:' + commit
+        tags = entry.get('RepoTags') or []
+        if len(tags) != 1 or tags[0].removeprefix('docker.io/library/') != tag:
+            raise ValueError('Image archive does not identify the published source tag')
+        raw = read_member(archive, entry['Config'])
+        digest = 'sha256:' + hashlib.sha256(raw).hexdigest()
+        if expected_digest and digest != expected_digest:
+            raise ValueError('Archived image configuration digest does not match the release')
+        config = json.loads(raw)
+        if (config.get('config', {}).get('Labels') or {}).get('org.opencontainers.image.revision') != commit:
+            raise ValueError('Archived image source commit does not match the release')
+        return {'digest': digest, 'configuration': config, 'tag': tag}
+
+
+def validate_loaded_image(image, archived, platform):
+    config = archived['configuration']
+    if image['Os'] + '/' + image['Architecture'] != platform or config['os'] + '/' + config['architecture'] != platform:
+        raise ValueError('Loaded image platform does not match the release')
+    if image.get('RootFS', {}).get('Layers') != config.get('rootfs', {}).get('diff_ids'):
+        raise ValueError('Loaded image filesystem layers do not match the verified archive')
+    if any(image['Config'].get(key) != value for key, value in config['config'].items()):
+        raise ValueError('Loaded image runtime configuration does not match the verified archive')
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', image.get('Id', '')):
+        raise ValueError('Docker did not return an immutable local image identity')
+    return image['Id']
 
 
 class GitHubError(RuntimeError):

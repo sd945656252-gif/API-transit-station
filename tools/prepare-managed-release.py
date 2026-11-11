@@ -12,7 +12,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'deploy/managed-updater'))
-from release_protocol import GitHub, GitHubError, MANIFEST_NAME, validate_manifest, version_tuple
+from release_protocol import (GitHub, GitHubError, MANIFEST_NAME, validate_manifest,
+                              version_tuple, archive_configuration, validate_loaded_image)
 
 OFFICIAL = 'Wei-Shaw/sub2api'
 REPOSITORY = os.environ.get('GITHUB_REPOSITORY', '')
@@ -149,6 +150,8 @@ def publish(args):
     name = f'sub2api-{platform.replace("/", "-")}-{metadata["commit"][:12]}.tar.gz'
     artifact = archive.with_name(name)
     archive.rename(artifact)
+    archived = archive_configuration(artifact, metadata['commit'])
+    validate_loaded_image(details, archived, platform)
     checksum = hashlib.sha256()
     with artifact.open('rb') as stream:
         while chunk := stream.read(1024 * 1024):
@@ -157,7 +160,7 @@ def publish(args):
         'version': metadata['version'], 'commit': metadata['commit'], 'official_commit': metadata['official_commit'],
         'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'artifacts': {platform: {'name': name, 'sha256': checksum.hexdigest(),
-                                'size': artifact.stat().st_size, 'image_id': details['Id']}}}
+                                'size': artifact.stat().st_size, 'image_id': archived['digest']}}}
     validate_manifest(manifest, REPOSITORY)
     manifest_path = artifact.with_name(MANIFEST_NAME)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
