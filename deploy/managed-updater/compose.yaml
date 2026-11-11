@@ -1,0 +1,39 @@
+services:
+  updater:
+    image: sub2api-managed-updater:local
+    build:
+      context: ../..
+      dockerfile: deploy/managed-updater/Dockerfile
+    container_name: sub2api-updater
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CUSTOM_REPOSITORY: ${CUSTOM_REPOSITORY:-sd945656252-gif/API-transit-station}
+      APP_CONTAINER: sub2api
+      APP_IMAGE: sub2api-local:runninghub
+    secrets:
+      - updater_token
+      - github_token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - updater_state:/state
+    networks:
+      - app
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+secrets:
+  updater_token:
+    file: ${UPDATER_SECRETS_DIR:-../../.managed-updater}/updater-token
+  github_token:
+    file: ${UPDATER_SECRETS_DIR:-../../.managed-updater}/github-token
+volumes:
+  updater_state:
+    name: sub2api_managed_updater_state
+networks:
+  app:
+    external: true
+    name: sub2api_sub2api-network

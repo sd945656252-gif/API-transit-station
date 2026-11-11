@@ -18,6 +18,14 @@ export default {
   },
 
   // Version Badge
+  managedUpdates: {
+    description: '更新官方内核并保留本站扩展，完成后同步 GitHub 并自动更新 Docker。',
+    updateNow: '立即更新并部署', running: '正在更新…', checkFailed: '版本检查未成功',
+    statusUnavailable: '暂时无法获取更新状态，请稍后重试。',
+    publishedButFailed: '源码已推送 GitHub，但 Docker 部署未成功。请查看上方原因后重试。',
+    failureHelp: '未完成的更新不会标记成功。涉及定制适配或数据迁移的问题需要补修后重试。',
+    stages: { idle: '等待更新', queued: '更新已排队', checking: '获取官方正式版本', syncing: '官方优先合并并检查定制适配', building: '构建新版镜像', publishing: '推送到 GitHub', deploying: '替换应用容器并确认健康状态', complete: '更新和部署已完成', failed: '更新失败', interrupted: '更新服务曾中断' }
+  },
   version: {
     currentVersion: '当前版本',
     latestVersion: '最新版本',

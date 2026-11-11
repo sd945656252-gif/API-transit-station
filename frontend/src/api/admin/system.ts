@@ -19,6 +19,7 @@ export interface VersionInfo {
   cached: boolean
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
+  managed_updates?: boolean
 }
 
 /**
@@ -43,6 +44,23 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
 export interface UpdateResult {
   message: string
   need_restart: boolean
+  managed?: boolean
+  job?: ManagedUpdateJob
+}
+
+export interface ManagedUpdateJob {
+  id?: string
+  state: string
+  stage: string
+  target_version?: string
+  error?: string
+  github_published?: boolean
+  repair_branch?: string
+}
+
+export async function getUpdateStatus(): Promise<ManagedUpdateJob> {
+  const { data } = await apiClient.get<ManagedUpdateJob>('/admin/system/update-status')
+  return data
 }
 
 export interface RollbackVersionInfo {

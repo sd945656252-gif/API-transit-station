@@ -1,0 +1,11 @@
+{
+  "backend/internal/server/routes/gateway.go": ["h.RunningHubGateway.AIAppRun", "h.RunningHubGateway.Create", "h.RunningHubGateway.Status", "h.RunningHubGateway.Outputs"],
+  "backend/internal/service/account.go": ["PlatformRunningHub"],
+  "backend/internal/service/openai_images.go": ["normalizeOpenAIImagesAspectRatio"],
+  "backend/internal/service/openai_images_direct.go": ["openAIImagesAspectRatioPrompt(prompt, parsed.AspectRatio)"],
+  "backend/internal/service/openai_images_responses.go": ["openAIImagesAspectRatioPrompt(prompt, parsed.AspectRatio)"],
+  "frontend/src/constants/platformCatalog.builtin.json": ["\"runninghub\""],
+  "frontend/src/components/layout/AppSidebar.vue": ["/admin/channels/monitor", "/admin/risk-control"],
+  "backend/internal/handler/admin/system_handler.go": ["managedUpdateRequest"],
+  "frontend/src/components/common/VersionBadge.vue": ["ManagedUpdatePanel"]
+}

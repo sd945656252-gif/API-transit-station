@@ -87,3 +87,4 @@ CLAUDE.md
 
 # Local object storage data and credentials
 .local-storage/
+.managed-updater/

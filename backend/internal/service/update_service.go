@@ -67,6 +67,9 @@ type UpdateService struct {
 	buildType      string // "source" for manual builds, "release" for CI builds
 }
 
+// CurrentVersion exposes immutable build metadata without a network check.
+func (s *UpdateService) CurrentVersion() string { return s.currentVersion }
+
 // NewUpdateService creates a new UpdateService
 func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string) *UpdateService {
 	return &UpdateService{

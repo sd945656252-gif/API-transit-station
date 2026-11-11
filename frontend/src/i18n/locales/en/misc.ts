@@ -18,6 +18,14 @@ export default {
   },
 
   // Version Badge
+  managedUpdates: {
+    description: 'Update the official core, preserve custom integrations, publish to GitHub and deploy Docker.',
+    updateNow: 'Update and deploy now', running: 'Updating…', checkFailed: 'Version check failed',
+    statusUnavailable: 'Update status is temporarily unavailable. Please retry.',
+    publishedButFailed: 'Source was pushed to GitHub, but Docker deployment failed. Check the error and retry.',
+    failureHelp: 'Incomplete updates are never marked successful. Custom integration or migration issues require repair before retrying.',
+    stages: { idle: 'Waiting for update', queued: 'Update queued', checking: 'Fetching official stable release', syncing: 'Applying official changes and checking custom integrations', building: 'Building application image', publishing: 'Publishing to GitHub', deploying: 'Replacing application and checking health', complete: 'Update and deployment completed', failed: 'Update failed', interrupted: 'Update service was interrupted' }
+  },
   version: {
     currentVersion: 'Current Version',
     latestVersion: 'Latest Version',

@@ -60,9 +60,11 @@ if ($EnableAdapter) {
 }
 
 # Explicit files prevent accidentally deploying the stock image or another override.
-docker compose -f docker-compose.yml -f compose.override.yaml build sub2api
+$composeFiles = @('-f', 'docker-compose.yml', '-f', 'compose.override.yaml')
+if (Test-Path '.managed-updater/app.override.json') { $composeFiles += @('-f', '.managed-updater/app.override.json') }
+docker compose @composeFiles build sub2api
 if ($LASTEXITCODE -ne 0) { throw 'Local application build failed; existing service was preserved.' }
-docker compose -f docker-compose.yml -f compose.override.yaml up -d --no-build --wait sub2api
+docker compose @composeFiles up -d --no-deps --no-build --wait sub2api
 if ($LASTEXITCODE -ne 0) { throw 'Application startup failed.' }
 
 if ($EnableAdapter) {

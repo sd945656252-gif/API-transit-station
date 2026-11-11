@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,25 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 // GET /api/v1/admin/system/check-updates
 func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	force := c.Query("force") == "true"
+	if managedUpdatesEnabled() {
+		version, ok := h.updateSvc.(interface{ CurrentVersion() string })
+		if !ok {
+			response.Error(c, http.StatusInternalServerError, "build version is unavailable")
+			return
+		}
+		data, err := managedUpdateRequest(c.Request.Context(), http.MethodGet,
+			"/check?current="+url.QueryEscape(version.CurrentVersion())+"&force="+strconv.FormatBool(force), nil)
+		if err != nil {
+			// Preserve capability/current-version information, but never call a
+			// failed release lookup 'up to date'. The UI displays this warning.
+			response.Success(c, gin.H{"current_version": version.CurrentVersion(),
+				"latest_version": "", "has_update": false, "cached": false,
+				"managed_updates": true, "build_type": "release", "warning": err.Error()})
+			return
+		}
+		response.Success(c, data)
+		return
+	}
 	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
@@ -85,6 +105,16 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 	operationID := buildSystemOperationID(c, "update")
 	payload := gin.H{"operation_id": operationID}
+	if managedUpdatesEnabled() {
+		job, err := managedUpdateRequest(c.Request.Context(), http.MethodPost, "/jobs", payload)
+		if err != nil {
+			response.Error(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		response.Accepted(c, gin.H{"managed": true, "need_restart": false, "job": job,
+			"message": "Update job accepted; follow update-status for the actual result."})
+		return
+	}
 	executeAdminIdempotentJSON(c, "admin.system.update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		lock, release, err := h.acquireSystemLock(ctx, operationID)
 		if err != nil {
@@ -131,6 +161,10 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 // GetRollbackVersions lists versions available for rollback
 // GET /api/v1/admin/system/rollback-versions
 func (h *SystemHandler) GetRollbackVersions(c *gin.Context) {
+	if managedUpdatesEnabled() {
+		response.Success(c, gin.H{"versions": []service.RollbackVersion{}})
+		return
+	}
 	versions, err := h.updateSvc.ListRollbackVersions(c.Request.Context())
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
@@ -147,6 +181,10 @@ func (h *SystemHandler) GetRollbackVersions(c *gin.Context) {
 // installs that specific release (must be one of the recent rollback versions).
 // POST /api/v1/admin/system/rollback
 func (h *SystemHandler) Rollback(c *gin.Context) {
+	if managedUpdatesEnabled() {
+		response.Error(c, http.StatusConflict, "Managed Docker deployments retain the previous container; stock binary rollback would discard custom integrations.")
+		return
+	}
 	var req struct {
 		Version string `json:"version"`
 	}

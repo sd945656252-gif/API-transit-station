@@ -10,7 +10,7 @@
             ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
             : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-800 dark:text-dark-400 dark:hover:bg-dark-700'
         ]"
-        :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
+        :title="appStore.versionWarning || (hasUpdate ? t('version.updateAvailable') : t('version.upToDate'))"
       >
         <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
         <span
@@ -89,7 +89,7 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!hasUpdate"
+                    v-if="!hasUpdate && !appStore.versionWarning"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -107,13 +107,16 @@
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
-                    hasUpdate
+                    appStore.versionWarning ? t('managedUpdates.checkFailed') : hasUpdate
                       ? t('version.latestVersion') + ': v' + latestVersion
                       : t('version.upToDate')
                   }}
                 </p>
               </div>
 
+              <p v-if="appStore.versionWarning" class="mb-3 whitespace-normal break-words rounded-lg bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">{{ appStore.versionWarning }}</p>
+              <ManagedUpdatePanel v-if="appStore.managedUpdates" :has-update="hasUpdate" @updated="refreshVersion(true)" />
+              <template v-else>
               <!-- Priority 1: Update error (must check before hasUpdate) -->
               <div v-if="updateError" class="space-y-2">
                 <div
@@ -624,6 +627,7 @@
                   </transition>
                 </div>
               </div>
+              </template>
             </template>
           </div>
         </div>
@@ -650,6 +654,7 @@ import {
 } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
+import ManagedUpdatePanel from '@/components/common/ManagedUpdatePanel.vue'
 
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
@@ -668,6 +673,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+let updateCheckTimer: ReturnType<typeof setInterval> | undefined
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
@@ -913,11 +919,15 @@ onMounted(() => {
   if (isAdmin.value) {
     // Use cached version if available, otherwise fetch
     appStore.fetchVersion(false)
+    updateCheckTimer = setInterval(() => {
+      if (isAdmin.value && document.visibilityState === 'visible') appStore.fetchVersion(false)
+    }, 60_000)
   }
   document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
+  if (updateCheckTimer) clearInterval(updateCheckTimer)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>
