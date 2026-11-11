@@ -1,6 +1,8 @@
 name: Sync official upstream
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"
@@ -33,9 +35,9 @@ jobs:
         run: |
           branch="sync/upstream-${GITHUB_RUN_ID}"
           git switch -c "$branch"
-          if ! git merge --no-commit --no-ff upstream/main; then
+          if ! git merge --no-commit --no-ff -X ours upstream/main; then
             git merge --abort
-            echo "官方更新与当前定制存在冲突，已停止同步；main 未修改。" >&2
+            echo "官方更新存在无法自动解决的冲突，已停止同步；main 未修改。" >&2
             exit 1
           fi
           if git diff --quiet HEAD --; then
@@ -60,4 +62,4 @@ jobs:
             --base main \
             --head "${{ steps.merge.outputs.branch }}" \
             --title "chore: sync official upstream" \
-            --body "官方更新已合并到临时分支。请先通过 CI 和人工检查，再合并到 main；如发生冲突，流程会停止并保留当前定制。"
+            --body "官方更新已合并到临时分支。冲突区域优先保留本仓库定制；请检查差异并等待 CI 通过后再合并。"
