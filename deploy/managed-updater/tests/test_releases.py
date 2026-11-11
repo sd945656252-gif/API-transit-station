@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import importlib.util
 import io
@@ -175,6 +176,98 @@ class IndependentInstallationTests(unittest.TestCase):
         deploy.assert_not_called()
         run.assert_not_called()
         self.assertEqual(progress.call_args.kwargs['state'], 'failed')
+
+
+class DeploymentRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.server = load_server()
+        self.server.JOB = {'id': 'deployment-test'}
+        self.policy = {'Name': 'on-failure', 'MaximumRetryCount': 7}
+        self.old = {'Id': 'original-container', 'Image': 'old-image',
+                    'Config': {'Image': 'old-image', 'Env': ['CUSTOM=value'], 'Labels': {}},
+                    'HostConfig': {'RestartPolicy': copy.deepcopy(self.policy)},
+                    'NetworkSettings': {'Networks': {'application-network': {}}}}
+        self.current = self.old
+        self.previous = None
+        self.events = []
+        for name, options in (
+                ('docker', {'side_effect': self.docker}),
+                ('progress', {'side_effect': self.progress}),
+                ('run', {'return_value': (0, '')}),
+                ('health', {'return_value': True})):
+            patcher = patch.object(self.server, name, **options)
+            setattr(self, name + '_mock', patcher.start())
+            self.addCleanup(patcher.stop)
+
+    def progress(self, stage, **fields):
+        self.events.append(('record', stage))
+        self.server.JOB.update(stage=stage, **fields)
+
+    def docker(self, method, path, payload=None, **kwargs):
+        self.events.append((method, path, copy.deepcopy(payload)))
+        if method == 'GET':
+            if path == '/containers/sub2api/json':
+                return self.current
+            if path == '/containers/sub2api-previous-deployme/json':
+                return self.previous
+            if path == '/containers/sub2api-updater/json':
+                return {'Mounts': [{'Destination': '/run/secrets/updater_token', 'Source': '/private/token'}]}
+            if path == '/images/old-image/json':
+                return {'Config': self.old['Config']}
+            if path == '/images/new-image/json':
+                return {'Id': 'new-image', 'Config': {'Labels': {'org.opencontainers.image.revision': COMMIT}}}
+        if method == 'POST' and path == '/containers/sub2api/update':
+            self.current['HostConfig']['RestartPolicy'] = copy.deepcopy(payload['RestartPolicy'])
+        elif method == 'POST' and path == '/containers/sub2api/rename?name=sub2api-previous-deployme':
+            self.previous, self.current = self.current, None
+        elif method == 'POST' and path == '/containers/create?name=sub2api':
+            self.current = {'Id': 'candidate-container', 'Config': payload,
+                            'HostConfig': payload['HostConfig']}
+        elif method == 'DELETE' and path == '/containers/sub2api?force=true':
+            self.current = None
+        elif method == 'POST' and path == '/containers/sub2api-previous-deployme/rename?name=sub2api':
+            self.current, self.previous = self.previous, None
+        elif method == 'POST' and path in ('/containers/sub2api/start', '/containers/sub2api/stop?t=60'):
+            pass
+        else:
+            raise AssertionError('Unexpected Docker operation: ' + method + ' ' + path)
+
+    def test_success_disarms_backup_before_stop_and_preserves_new_restart_policy(self):
+        self.server.deploy('new-image', COMMIT)
+        self.assertEqual(self.previous['HostConfig']['RestartPolicy']['Name'], 'no')
+        self.assertEqual(self.current['HostConfig']['RestartPolicy'], self.policy)
+        self.assertEqual(self.server.JOB['previous_restart_policy'], self.policy)
+        actions = [event[:2] for event in self.events]
+        self.assertLess(actions.index(('record', 'deploying')),
+                        actions.index(('POST', '/containers/sub2api/update')))
+        self.assertLess(actions.index(('POST', '/containers/sub2api/update')),
+                        actions.index(('POST', '/containers/sub2api/stop?t=60')))
+
+    def test_failed_candidate_restores_original_container_and_restart_policy(self):
+        self.health_mock.side_effect = [False, True]
+        with self.assertRaisesRegex(RuntimeError, 'previous application restored=True'):
+            self.server.deploy('new-image', COMMIT)
+        self.assertEqual(self.current['Id'], 'original-container')
+        self.assertEqual(self.current['HostConfig']['RestartPolicy'], self.policy)
+        self.assertIsNone(self.previous)
+        self.server.run.assert_not_called()
+
+    def test_restart_before_stop_recovers_policy_on_same_original_container(self):
+        self.server.JOB.update(previous_id=self.old['Id'], previous_restart_policy=self.policy,
+                               previous_container='sub2api-previous-deployme')
+        self.old['HostConfig']['RestartPolicy'] = {'Name': 'no', 'MaximumRetryCount': 0}
+        self.assertTrue(self.server.recover_deployment())
+        self.assertEqual(self.current['HostConfig']['RestartPolicy'], self.policy)
+        self.assertFalse(any(event[0] == 'DELETE' for event in self.events))
+
+    def test_recovery_refuses_to_replace_unrelated_application(self):
+        self.previous = self.old
+        self.current = {'Id': 'external-container', 'Config': {'Labels': {}}}
+        self.server.JOB.update(previous_id=self.old['Id'], previous_restart_policy=self.policy,
+                               previous_container='sub2api-previous-deployme')
+        with self.assertRaisesRegex(RuntimeError, 'outside this job'):
+            self.server.recover_deployment()
+        self.assertFalse(any(event[0] != 'GET' for event in self.events))
 
 
 if __name__ == '__main__':

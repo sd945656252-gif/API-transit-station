@@ -201,17 +201,18 @@ def recover_deployment():
     current = docker('GET', f'/containers/{APP}/json', missing_ok=True)
     previous_name = JOB.get('previous_container')
     previous = docker('GET', f'/containers/{previous_name}/json', missing_ok=True) if previous_name else None
-    if current and current['Id'] == JOB.get('previous_id'):
-        docker('POST', f'/containers/{APP}/start')
-        return health(APP)
-    if not previous or previous['Id'] != JOB.get('previous_id'):
-        raise RuntimeError('Previous container cannot be identified; operator review is required')
-    if current:
-        labels = current['Config'].get('Labels') or {}
-        if labels.get('io.sub2api.update-job') != JOB.get('id'):
-            raise RuntimeError('Application was changed outside this job; automatic recovery stopped')
-        docker('DELETE', f'/containers/{APP}?force=true')
-    docker('POST', f'/containers/{previous_name}/rename?name={APP}')
+    if not current or current['Id'] != JOB.get('previous_id'):
+        if not previous or previous['Id'] != JOB.get('previous_id'):
+            raise RuntimeError('Previous container cannot be identified; operator review is required')
+        if current:
+            labels = current['Config'].get('Labels') or {}
+            if labels.get('io.sub2api.update-job') != JOB.get('id'):
+                raise RuntimeError('Application was changed outside this job; automatic recovery stopped')
+            docker('DELETE', f'/containers/{APP}?force=true')
+        docker('POST', f'/containers/{previous_name}/rename?name={APP}')
+    policy = JOB.get('previous_restart_policy')
+    if policy is not None:
+        docker('POST', f'/containers/{APP}/update', {'RestartPolicy': policy})
     docker('POST', f'/containers/{APP}/start')
     return health(APP)
 
@@ -255,8 +256,12 @@ def deploy(image, revision):
         name: {'Aliases': [APP]} for name in old['NetworkSettings']['Networks']}}
     backup = f'{APP}-previous-{JOB["id"][:8]}'
     progress('deploying', previous_container=backup, previous_id=old['Id'], previous_image=old['Image'], candidate_image=image,
+             previous_restart_policy=copy.deepcopy(old['HostConfig']['RestartPolicy']),
              commit=revision, deployment_started=True)
     try:
+        # Persist the original policy before disarming it, including the crash
+        # window before stop/rename. Only the active application may auto-start.
+        docker('POST', f'/containers/{APP}/update', {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}})
         docker('POST', f'/containers/{APP}/stop?t=60')
         docker('POST', f'/containers/{APP}/rename?name={backup}')
         docker('POST', f'/containers/create?name={APP}', config)
