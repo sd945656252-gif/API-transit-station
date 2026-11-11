@@ -65,10 +65,13 @@ jobs:
               echo "定制改动与官方代码冲突，已停止同步；main 未修改。" >&2
               exit 1
             fi
-            git restore --source="$custom_base" --staged --worktree -- .github/workflows
             rm -f .github/upstream-custom.patch
             printf '%s\n' "$upstream_sha" > .upstream-ref
             git add -A
+            while read -r mode type blob path; do
+              git update-index --add --cacheinfo "$mode" "$blob" "$path"
+            done < <(git ls-tree -r "$custom_base" .github/workflows)
+            git diff --cached --quiet "$custom_base" -- .github/workflows || { echo "Custom workflow files changed during bootstrap" >&2; exit 1; }
             tree="$(git write-tree)"
             commit="$(printf '%s\n' 'Merge official baseline with custom integrations' | git commit-tree "$tree" -p "$custom_base")"
             git update-ref HEAD "$commit"
