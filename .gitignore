@@ -171,6 +171,7 @@ issues/
 # Local object storage data and credentials
 .local-storage/
 .managed-updater/
+!docs/LOCAL_STARTUP.md
 
 # Adapter verification is part of the deliverable, not generated test data.
 !adapter-gateway/tests/

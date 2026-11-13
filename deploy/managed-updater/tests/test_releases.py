@@ -270,5 +270,47 @@ class DeploymentRecoveryTests(unittest.TestCase):
         self.assertFalse(any(event[0] != 'GET' for event in self.events))
 
 
+class ContainerRetirementTests(unittest.TestCase):
+    def setUp(self):
+        self.server = load_server()
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.server.STATE = Path(self.directory.name)
+        self.previous = {'Id': 'a' * 64, 'Name': '/sub2api-previous-example',
+                         'State': {'Running': False, 'Status': 'exited'},
+                         'HostConfig': {'RestartPolicy': {'Name': 'no'}},
+                         'Config': {'Env': ['PRIVATE=test-credential']}}
+
+    def test_archive_is_written_before_non_force_container_removal(self):
+        def remove(method, path):
+            archive = self.server.STATE / 'retired-containers' / (self.previous['Id'] + '.json')
+            record = json.loads(archive.read_text(encoding='utf-8'))
+            self.assertEqual(record['container'], self.previous)
+            self.assertEqual(record['restore_networks'], {'application-network': {}})
+            self.assertEqual((method, path), ('DELETE', '/containers/' + self.previous['Id']))
+        with patch.object(self.server, 'docker', side_effect=remove) as docker:
+            self.server.archive_retired_container(self.previous, {'application-network': {}})
+        docker.assert_called_once()
+
+    def test_running_container_is_never_removed(self):
+        self.previous['State'].update(Running=True, Status='running')
+        with patch.object(self.server, 'docker') as docker:
+            with self.assertRaisesRegex(RuntimeError, 'running'):
+                self.server.archive_retired_container(self.previous, {})
+        docker.assert_not_called()
+
+    def test_archive_failure_does_not_remove_container(self):
+        with patch.object(self.server, 'docker') as docker, patch.object(Path, 'mkdir', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.server.archive_retired_container(self.previous, {})
+        docker.assert_not_called()
+
+    def test_incomplete_deployment_keeps_recovery_container(self):
+        self.server.JOB = {'state': 'deploying', 'previous_container': 'sub2api-previous-example'}
+        with patch.object(self.server, 'docker') as docker:
+            self.server.retire_previous()
+        docker.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

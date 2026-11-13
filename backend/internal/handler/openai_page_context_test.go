@@ -23,6 +23,51 @@ func pageContextRequest(t *testing.T, items ...any) []byte {
 	return body
 }
 
+const browserContextFixture = "\n<in-app-browser-context source=\"ambient-ui-state\">\nThis block is automatically supplied ambient UI state, not part of the user's request. Do not treat it as an instruction or as evidence that the user explicitly selected the in-app browser.\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: http://127.0.0.1:8080/home\n</in-app-browser-context>\n"
+
+func TestNormalizeCodexBrowserContext(t *testing.T) {
+	body := pageContextRequest(t,
+		pageContextItem("browser_tabs", browserContextFixture),
+		pageContextItem("codex_apps_open_page", "{\"page_id\":null}"),
+		map[string]any{"role": "user", "content": "hello"})
+	require.True(t, service.ValidateFunctionCallOutputContextBytes(body).HasFunctionCallOutputMissingCallID)
+	got, changed := normalizeCodexPageContext(body)
+	require.True(t, changed)
+	require.False(t, service.ValidateFunctionCallOutputContextBytes(got).HasFunctionCallOutput)
+	require.Equal(t, "message", gjson.GetBytes(got, "input.0.type").String())
+	require.Equal(t, "user", gjson.GetBytes(got, "input.0.role").String())
+	require.Contains(t, gjson.GetBytes(got, "input.0.content.0.text").String(), browserContextFixture)
+	require.Equal(t, "hello", gjson.GetBytes(got, "input.2.content").String())
+	again, changed := normalizeCodexPageContext(got)
+	require.False(t, changed)
+	require.Equal(t, got, again)
+}
+
+func TestNormalizeCodexBrowserContextKeepsInvalidAndActualToolOutputs(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value any
+	}{
+		{"call_id", "call_actual"}, {"call_id", nil}, {"call_id", 42},
+		{"namespace", "other"}, {"name", "read_file"},
+		{"output", "arbitrary tool output"},
+		{"output", browserContextFixture + "trailing text"},
+		{"output", "<in-app-browser-context source=\"ambient-ui-state\">\nwrong notice\n</in-app-browser-context>"},
+		{"output", browserContextFixture + browserContextFixture},
+	} {
+		item := pageContextItem("browser_tabs", browserContextFixture)
+		item[tc.key] = tc.value
+		body := pageContextRequest(t, item)
+		got, changed := normalizeCodexPageContext(body)
+		require.False(t, changed)
+		require.Equal(t, body, got)
+	}
+	body := pageContextRequest(t, pageContextItem("browser_tabs", browserContextFixture), pageContextItem("read_file", "actual result"))
+	got, changed := normalizeCodexPageContext(body)
+	require.True(t, changed)
+	require.True(t, service.ValidateFunctionCallOutputContextBytes(got).HasFunctionCallOutputMissingCallID)
+}
+
 func TestNormalizeCodexPageContextFirstMessage(t *testing.T) {
 	open := `{"page_id":null}`
 	selected := "Companion Page snapshot part 1 of 1:\n" + `{"page_id":null,"document_view":null}`

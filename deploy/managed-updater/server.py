@@ -279,6 +279,50 @@ def deploy(image, revision):
     run(['docker', 'tag', image, IMAGE], cwd=STATE)
 
 
+def archive_retired_container(previous, restore_networks):
+    # Preserve private recovery settings without leaving a Compose shadow.
+    name = previous.get('Name', '').lstrip('/')
+    if not name.startswith(APP + '-previous-'):
+        raise RuntimeError('Refusing to retire a non-previous container')
+    if previous['State'].get('Running') or previous['State'].get('Status') not in ('exited', 'created'):
+        raise RuntimeError('Refusing to retire a running or ambiguous container')
+    if previous['HostConfig']['RestartPolicy']['Name'] != 'no':
+        raise RuntimeError('Previous container must have automatic restart disabled')
+    directory = STATE / 'retired-containers'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    archive = directory / (previous['Id'] + '.json')
+    temporary = archive.with_suffix('.tmp')
+    # Credentials remain in the private state volume, never logs or releases.
+    descriptor = {'schema_version': 1, 'retired_at': now(), 'container': previous,
+                  'restore_networks': restore_networks}
+    with open(temporary, 'w', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+        json.dump(descriptor, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(archive)
+    # No force or volume removal: a concurrent start prevents deletion.
+    docker('DELETE', '/containers/' + previous['Id'])
+    return str(archive)
+
+
+def retire_previous():
+    if JOB.get('state') != 'succeeded' or not JOB.get('previous_container'):
+        return
+    current = docker('GET', f'/containers/{APP}/json')
+    labels = current['Config'].get('Labels') or {}
+    if (current['State'].get('Health', {}).get('Status') != 'healthy'
+            or labels.get('org.opencontainers.image.revision') != JOB.get('commit')
+            or labels.get('io.sub2api.update-job') != JOB.get('id')):
+        raise RuntimeError('Healthy completed deployment identity could not be confirmed')
+    previous = docker('GET', '/containers/' + JOB['previous_container'] + '/json', missing_ok=True)
+    if previous is None:
+        return
+    if previous['Id'] != JOB.get('previous_id'):
+        raise RuntimeError('Previous container identity changed; retirement stopped')
+    archive = archive_retired_container(previous, current['NetworkSettings']['Networks'])
+    progress('complete', previous_container_archive=archive, previous_container_retired=True)
+
+
 def worker(ready):
     archive = STATE / ('image-' + JOB['id'] + '.tar.gz')
     try:
@@ -306,6 +350,10 @@ def worker(ready):
         progress('deploying', state='deploying')
         deploy(local_image_id, revision)
         progress('complete', state='succeeded', finished_at=now())
+        try:
+            retire_previous()
+        except Exception as error:
+            progress('complete', retirement_error=redact(error))
     except Exception as error:
         progress('failed', state='failed', error=redact(error)[-4000:], finished_at=now())
     finally:
@@ -411,4 +459,9 @@ if __name__ == '__main__':
                     progress('interrupted', state='failed', error=message + ' ' + redact(error), finished_at=now())
             else:
                 progress('interrupted', state='failed', error=message, finished_at=now())
+    if JOB.get('state') == 'succeeded':
+        try:
+            retire_previous()
+        except Exception as error:
+            progress('complete', retirement_error=redact(error))
     ThreadingHTTPServer(('0.0.0.0', 8099), Handler).serve_forever()
