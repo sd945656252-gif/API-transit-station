@@ -18,6 +18,12 @@ from release_protocol import (GitHub, GitHubError, MANIFEST_NAME, validate_manif
 OFFICIAL = 'Wei-Shaw/sub2api'
 REPOSITORY = os.environ.get('GITHUB_REPOSITORY', '')
 API = GitHub(os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN', ''))
+REVIEWED_NEW_SQL = {
+    # v0.2.23: adds nullable/defaulted columns and replaces rollup functions.
+    # UPDATE/DELETE are inside function bodies; no existing rows are rewritten at migration time.
+    'backend/migrations/251_group_usage_rollup_nonblocking_build.sql':
+        'da504646104cec14aa7bcf5a0af6f06f5cd40883459379ae915db27c1d4cec8b',
+}
 
 
 def git(*args, check=True, data=None):
@@ -35,6 +41,21 @@ def contracts():
         value = file.read_text(encoding='utf-8') if file.is_file() else ''
         if any(marker not in value for marker in markers):
             raise RuntimeError('Custom integration requires repair: ' + path)
+
+
+def check_migrations(baseline, target):
+    changes = git('diff', '--no-renames', '--name-status', baseline, target, '--',
+                  ':(glob)backend/migrations/*.sql')[1]
+    for line in changes.splitlines():
+        change, path = line.split('\t', 1)
+        if change != 'A':
+            raise RuntimeError('Existing database migration changed; data compatibility review is required: ' + path)
+        raw = subprocess.check_output(['git', 'show', f'{target}:{path}'], cwd=ROOT)
+        if hashlib.sha256(raw).hexdigest() == REVIEWED_NEW_SQL.get(path):
+            continue
+        sql = re.sub(r'/\*.*?\*/|--[^\n]*', '', raw.decode('utf-8'), flags=re.S)
+        if re.search(r'\b(DROP|TRUNCATE|DELETE|UPDATE|RENAME)\b|\bALTER\s+COLUMN\b', sql, re.I):
+            raise RuntimeError('Data-changing migration requires review: ' + path)
 
 
 def sync_official(release):
@@ -62,14 +83,7 @@ def sync_official(release):
         raise RuntimeError('Official baseline diverged; integration review is required')
     for ref_sha in (baseline, target):
         git('fetch', '--depth=1', '--no-tags', f'https://github.com/{OFFICIAL}.git', ref_sha)
-    changes = git('diff', '--name-status', baseline, target, '--', 'backend/migrations')[1]
-    if any(line and not line.startswith('A\t') for line in changes.splitlines()):
-        raise RuntimeError('Existing database migrations changed; data compatibility review is required')
-    for line in changes.splitlines():
-        path = line.split('\t')[-1]
-        sql = re.sub(r'/\*.*?\*/|--[^\n]*', '', git('show', f'{target}:{path}')[1], flags=re.S)
-        if re.search(r'\b(DROP|TRUNCATE|DELETE|UPDATE|RENAME)\b|\bALTER\s+COLUMN\b', sql, re.I):
-            raise RuntimeError('Data-changing migration requires review: ' + path)
+    check_migrations(baseline, target)
     patch = subprocess.check_output(['git', 'diff', '--binary', baseline, target, '--', '.',
                                      ':(exclude).github/workflows/**'], cwd=ROOT)
     code, output = git('apply', '--3way', '--index', '--whitespace=nowarn', '-', data=patch, check=False)
